@@ -1,0 +1,77 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum RoomStatus {
+  LOBBY
+  PLAYING
+  FINISHED
+}
+
+enum EconomicRole {
+  FDI
+  SOE
+  POE
+  COOP
+  HOUSEHOLD
+  WORKER
+}
+
+enum ActionType {
+  PRODUCE
+  INVEST
+  WELFARE
+  OPTIMIZE
+  SOCIAL
+}
+
+model Room {
+  id           String        @id
+  status       RoomStatus    @default(LOBBY)
+  currentRound Int           @default(1)
+  maxRounds    Int           @default(5)
+  macroBudget  Float         @default(0.0)
+  createdAt    DateTime      @default(now())
+  
+  players      Player[]
+  actions      RoundAction[]
+}
+
+model Player {
+  id                  String        @id @default(uuid())
+  socketId            String        @unique
+  username            String
+  role                EconomicRole?
+  capital             Float         @default(0.0)
+  capitalMultiplier   Float         @default(1.0)
+  laborScore          Float         @default(0.0)
+  socialScore         Float         @default(0.0)
+  welfareScore        Float         @default(0.0)
+  sustainabilityScore Float         @default(0.0)
+  totalScore          Float         @default(0.0)
+  isOnline            Boolean       @default(true)
+  isAdmin             Boolean       @default(false)
+  
+  roomId              String
+  room                Room          @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  actions             RoundAction[]
+}
+
+model RoundAction {
+  id         String     @id @default(uuid())
+  round      Int
+  actionType ActionType
+  createdAt  DateTime   @default(now())
+  
+  playerId   String
+  player     Player     @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  roomId     String
+  room       Room       @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@unique([playerId, round])
+}

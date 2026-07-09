@@ -1,0 +1,25 @@
+{
+  "name": "mln122-game-ecorace",
+  "version": "1.0.0",
+  "description": "Đường Đua Kinh Tế Việt Nam (MLN122) - Web Game",
+  "private": true,
+  "workspaces": [
+    "shared",
+    "backend",
+    "frontend"
+  ],
+  "scripts": {
+    "dev:shared": "npm run dev -w shared",
+    "dev:backend": "npm run start:dev -w backend",
+    "dev:frontend": "npm run dev -w frontend",
+    "dev": "npm run dev --workspaces --if-present",
+    "build:shared": "npm run build -w shared --if-present",
+    "build:backend": "npm run build -w backend",
+    "build:frontend": "npm run build -w frontend",
+    "build": "npm run build -w shared --if-present && npm run build -w frontend && npm run build -w backend",
+    "start": "npm run start:prod -w backend"
+  },
+  "devDependencies": {
+    "typescript": "^5.2.2"
+  }
+}
