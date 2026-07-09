@@ -1,4 +1,4 @@
-"export enum RoomStatus {
+export enum RoomStatus {
   LOBBY = 'LOBBY',
   PLAYING = 'PLAYING',
   FINISHED = 'FINISHED',
@@ -76,5 +76,5 @@ export interface RoundCalculationResult {
 export interface SocketResponse<T = any> {
   success: boolean;
   data?: T;
-  error?: string
-<truncated 1101 bytes>
+  error?: string;
+}

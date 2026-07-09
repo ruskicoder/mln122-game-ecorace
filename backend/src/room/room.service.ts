@@ -1,4 +1,4 @@
-"import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { JwtService } from '@nestjs/jwt';
 import { Room, Player, RoomStatus } from '@prisma/client';
@@ -64,5 +64,6 @@ export class RoomService {
     if (!room) {
       return { exists: false };
     }
-    return { exists: true, status: room.st
-<truncated 18 bytes>
+    return { exists: true, status: room.status };
+  }
+}

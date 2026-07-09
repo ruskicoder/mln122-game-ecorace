@@ -1,4 +1,4 @@
-"import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from '@nestjs/common';
+import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 
@@ -52,5 +52,14 @@ export class AdminGuard implements CanActivate {
       const actualToken = token.startsWith('Bearer ') ? token.substring(7) : token;
 
       try {
-        co
-<truncated 398 bytes>
+        const payload = await this.jwtService.verifyAsync(actualToken, {
+          secret: this.configService.get<string>('JWT_SECRET', 'super-secret-key-change-in-production'),
+        });
+        return !!payload.isAdmin;
+      } catch (err) {
+        return false;
+      }
+    }
+    return false;
+  }
+}
