@@ -16,6 +16,10 @@ interface SocketContextType {
   submitAction: (actionType: ActionType) => void;
   adminStartGame: () => void;
   adminNextRound: () => void;
+  adminUpdateSettings: (maxRounds: number, roundDuration: number, spectatorMode?: boolean) => void;
+  adminAdjustPoints: (playerId: string, capitalDelta: number, scoreDelta: number) => void;
+  adminForceEndGame: () => void;
+  adminSetSpectatorMode: (spectatorMode: boolean) => void;
   leaveRoom: () => void;
   clearError: () => void;
 }
@@ -84,6 +88,8 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
               status: res.data!.role ? RoomStatus.PLAYING : RoomStatus.LOBBY,
               currentRound: 1,
               maxRounds: 5,
+              roundDuration: 40,
+              spectatorMode: false,
               macroBudget: 0.0,
               createdAt: '',
             });
@@ -101,17 +107,20 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       console.log('[socket] disconnected');
     });
 
-    newSocket.on('room_updated', (data: { roomId: string; players: Player[] }) => {
+    newSocket.on('room_updated', (data: { roomId: string; players: Player[]; room?: Partial<Room> }) => {
       setRoom((prev) => {
         const base = prev ?? {
           id: data.roomId,
           status: RoomStatus.LOBBY,
           currentRound: 1,
           maxRounds: 5,
+          roundDuration: 40,
+          spectatorMode: false,
           macroBudget: 0.0,
           createdAt: '',
         };
-        return { ...base, players: data.players };
+        // Merge full room snapshot when server sends it (settings updates, join, disconnect)
+        return { ...base, ...data.room, players: data.players };
       });
 
       // Keep own player object in sync (use ref, no stale closure)
@@ -128,10 +137,12 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           status: RoomStatus.PLAYING,
           currentRound: 1,
           maxRounds: 5,
+          roundDuration: data.duration,
+          spectatorMode: false,
           macroBudget: 0.0,
           createdAt: '',
         };
-        return { ...base, status: RoomStatus.PLAYING, players: data.players };
+        return { ...base, status: RoomStatus.PLAYING, roundDuration: data.duration, players: data.players };
       });
       const self = data.players.find(
         (p) => p.socketId === newSocket.id || p.id === playerIdRef.current,
@@ -142,7 +153,7 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     });
 
     newSocket.on('round_started', (data: { round: number; duration: number; macroBudget: number }) => {
-      setRoom((prev) => prev ? { ...prev, currentRound: data.round, macroBudget: data.macroBudget } : null);
+      setRoom((prev) => prev ? { ...prev, currentRound: data.round, roundDuration: data.duration, macroBudget: data.macroBudget } : null);
       setResults(null);
     });
 
@@ -238,6 +249,8 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             status: RoomStatus.LOBBY,
             currentRound: 1,
             maxRounds: 5,
+            roundDuration: 40,
+            spectatorMode: false,
             macroBudget: 0.0,
             createdAt: '',
           });
@@ -282,6 +295,55 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }
   };
 
+  const adminUpdateSettings = (maxRounds: number, roundDuration: number, spectatorMode?: boolean) => {
+    const adminToken = localStorage.getItem('adminToken');
+    const s = socketRef.current;
+    const r = roomRef.current;
+    if (s && r && adminToken) {
+      s.emit('admin_update_settings', { roomId: r.id, maxRounds, roundDuration, spectatorMode }, (res: SocketResponse) => {
+        if (!res.success) setError(res.error || 'Lỗi khi cập nhật cài đặt');
+      });
+    }
+  };
+
+  const adminSetSpectatorMode = (spectatorMode: boolean) => {
+    const adminToken = localStorage.getItem('adminToken');
+    const s = socketRef.current;
+    const r = roomRef.current;
+    if (s && r && adminToken) {
+      s.emit('admin_update_settings', {
+        roomId: r.id,
+        maxRounds: r.maxRounds,
+        roundDuration: r.roundDuration,
+        spectatorMode,
+      }, (res: SocketResponse) => {
+        if (!res.success) setError(res.error || 'Lỗi khi cập nhật chế độ quan sát');
+      });
+    }
+  };
+
+  const adminAdjustPoints = (playerId: string, capitalDelta: number, scoreDelta: number) => {
+    const adminToken = localStorage.getItem('adminToken');
+    const s = socketRef.current;
+    const r = roomRef.current;
+    if (s && r && adminToken) {
+      s.emit('admin_adjust_points', { roomId: r.id, playerId, capitalDelta, scoreDelta }, (res: SocketResponse) => {
+        if (!res.success) setError(res.error || 'Lỗi khi cộng/trừ điểm');
+      });
+    }
+  };
+
+  const adminForceEndGame = () => {
+    const adminToken = localStorage.getItem('adminToken');
+    const s = socketRef.current;
+    const r = roomRef.current;
+    if (s && r && adminToken) {
+      s.emit('admin_force_end', { roomId: r.id }, (res: SocketResponse) => {
+        if (!res.success) setError(res.error || 'Lỗi khi kết thúc game sớm');
+      });
+    }
+  };
+
   const leaveRoom = () => {
     localStorage.removeItem('playerId');
     localStorage.removeItem('roomId');
@@ -307,6 +369,10 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         submitAction,
         adminStartGame,
         adminNextRound,
+        adminUpdateSettings,
+        adminAdjustPoints,
+        adminForceEndGame,
+        adminSetSpectatorMode,
         leaveRoom,
         clearError,
       }}

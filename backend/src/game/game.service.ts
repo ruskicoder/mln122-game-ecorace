@@ -32,6 +32,54 @@ export class GameService {
     });
   }
 
+  async updateRoomSettings(
+    roomId: string,
+    maxRounds: number,
+    roundDuration: number,
+    spectatorMode?: boolean,
+  ): Promise<Room> {
+    const formattedRoomId = roomId.toUpperCase();
+    return this.prisma.room.update({
+      where: { id: formattedRoomId },
+      data: {
+        maxRounds,
+        roundDuration,
+        ...(spectatorMode !== undefined ? { spectatorMode } : {}),
+      },
+    });
+  }
+
+  async getRoomLeaderboard(roomId: string): Promise<Player[]> {
+    const room = await this.prisma.room.findUnique({ where: { id: roomId } });
+    return this.prisma.player.findMany({
+      where: {
+        roomId,
+        ...(room?.spectatorMode ? { isAdmin: false } : {}),
+      },
+      orderBy: { totalScore: 'desc' },
+    });
+  }
+
+  async adjustPlayerPoints(playerId: string, capitalDelta: number, scoreDelta: number): Promise<Player> {
+    return this.prisma.player.update({
+      where: { id: playerId },
+      data: {
+        capital: { increment: capitalDelta },
+        totalScore: { increment: scoreDelta },
+      },
+    });
+  }
+
+  async forceEndGame(roomId: string): Promise<Room> {
+    const formattedRoomId = roomId.toUpperCase();
+    return this.prisma.room.update({
+      where: { id: formattedRoomId },
+      data: {
+        status: RoomStatus.FINISHED,
+      },
+    });
+  }
+
   async joinRoom(roomId: string, username: string, socketId: string): Promise<Player> {
     const formattedRoomId = roomId.toUpperCase();
     const room = await this.prisma.room.findUnique({
@@ -143,9 +191,12 @@ export class GameService {
       [EconomicRole.WORKER]: 50.0,
     };
 
-    // Shuffle and assign roles
-    const players = room.players;
-    const updatePromises = players.map((player, idx) => {
+    // In spectator mode, the admin is excluded from role assignment
+    const eligiblePlayers = room.spectatorMode
+      ? room.players.filter((p) => !p.isAdmin)
+      : room.players;
+
+    const updatePromises = eligiblePlayers.map((player, idx) => {
       const assignedRole = roles[idx % roles.length];
       const initialCapital = initialCapitals[assignedRole];
 
@@ -210,8 +261,15 @@ export class GameService {
 
   async checkAllActionsSubmitted(roomId: string, round: number): Promise<boolean> {
     const formattedRoomId = roomId.toUpperCase();
+    const room = await this.prisma.room.findUnique({ where: { id: formattedRoomId } });
+
     const onlinePlayersCount = await this.prisma.player.count({
-      where: { roomId: formattedRoomId, isOnline: true },
+      where: {
+        roomId: formattedRoomId,
+        isOnline: true,
+        // In spectator mode the admin has no role and never submits an action
+        ...(room?.spectatorMode ? { isAdmin: false } : {}),
+      },
     });
 
     const submittedActionsCount = await this.prisma.roundAction.count({

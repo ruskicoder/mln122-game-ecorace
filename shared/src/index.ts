@@ -43,10 +43,13 @@ export interface Room {
   status: RoomStatus;
   currentRound: number;
   maxRounds: number;
+  roundDuration: number;
+  spectatorMode: boolean;
   macroBudget: number;
   createdAt: Date | string;
   players?: Player[];
 }
+
 
 export interface RoundAction {
   id: string;

@@ -31,9 +31,11 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     console.log(`[gateway] Client disconnected: ${client.id}`);
     const player = await this.gameService.disconnectPlayer(client.id);
     if (player) {
+      const room = await this.gameService.getRoom(player.roomId);
       this.server.to(player.roomId).emit('room_updated', {
         roomId: player.roomId,
         players: await this.gameService.getRoomPlayers(player.roomId),
+        room,
       });
     }
   }
@@ -58,11 +60,13 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       await client.join(formattedRoomId);
       
       const players = await this.gameService.getRoomPlayers(formattedRoomId);
-      
+      const room = await this.gameService.getRoom(formattedRoomId);
+
       // Notify all players in room
       this.server.to(formattedRoomId).emit('room_updated', {
         roomId: formattedRoomId,
         players,
+        room,
       });
 
       return { success: true, data: player };
@@ -92,17 +96,20 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     try {
+      const room = await this.gameService.getRoom(formattedRoomId);
+      const duration = room ? room.roundDuration : 40;
+
       const players = await this.gameService.startGame(formattedRoomId);
 
       this.server.to(formattedRoomId).emit('game_started', {
         roomId: formattedRoomId,
         players,
-        duration: 40,
+        duration,
       });
 
       this.server.to(formattedRoomId).emit('round_started', {
         round: 1,
-        duration: 40,
+        duration,
         macroBudget: 0.0,
       });
 
@@ -187,6 +194,105 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
+  @SubscribeMessage('admin_update_settings')
+  async handleUpdateSettings(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { roomId: string; maxRounds: number; roundDuration: number; spectatorMode?: boolean },
+  ): Promise<SocketResponse> {
+    const { roomId, maxRounds, roundDuration, spectatorMode } = data;
+    const formattedRoomId = roomId.toUpperCase();
+
+    let player = await this.prismaFindPlayerBySocket(client.id);
+    if (!player || !player.isAdmin) {
+      player = await this.gameService.getRoomAdminPlayer(formattedRoomId);
+    }
+
+    if (!player || !player.isAdmin) {
+      return { success: false, error: 'Chỉ Admin mới có quyền cập nhật cài đặt' };
+    }
+
+    try {
+      const room = await this.gameService.updateRoomSettings(formattedRoomId, maxRounds, roundDuration, spectatorMode);
+      const players = await this.gameService.getRoomPlayers(formattedRoomId);
+
+      this.server.to(formattedRoomId).emit('room_updated', {
+        roomId: formattedRoomId,
+        players,
+        room,
+      });
+
+      return { success: true, data: room };
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Lỗi khi cập nhật cài đặt' };
+    }
+  }
+
+  @SubscribeMessage('admin_adjust_points')
+  async handleAdjustPoints(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { roomId: string; playerId: string; capitalDelta: number; scoreDelta: number },
+  ): Promise<SocketResponse> {
+    const { roomId, playerId, capitalDelta, scoreDelta } = data;
+    const formattedRoomId = roomId.toUpperCase();
+
+    let player = await this.prismaFindPlayerBySocket(client.id);
+    if (!player || !player.isAdmin) {
+      player = await this.gameService.getRoomAdminPlayer(formattedRoomId);
+    }
+
+    if (!player || !player.isAdmin) {
+      return { success: false, error: 'Chỉ Admin mới có quyền cộng/trừ điểm' };
+    }
+
+    try {
+      await this.gameService.adjustPlayerPoints(playerId, capitalDelta, scoreDelta);
+      const players = await this.gameService.getRoomPlayers(formattedRoomId);
+      const room = await this.gameService.getRoom(formattedRoomId);
+
+      this.server.to(formattedRoomId).emit('room_updated', {
+        roomId: formattedRoomId,
+        players,
+        room,
+      });
+
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Lỗi khi cộng/trừ điểm' };
+    }
+  }
+
+  @SubscribeMessage('admin_force_end')
+  async handleForceEnd(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { roomId: string },
+  ): Promise<SocketResponse> {
+    const { roomId } = data;
+    const formattedRoomId = roomId.toUpperCase();
+
+    let player = await this.prismaFindPlayerBySocket(client.id);
+    if (!player || !player.isAdmin) {
+      player = await this.gameService.getRoomAdminPlayer(formattedRoomId);
+    }
+
+    if (!player || !player.isAdmin) {
+      return { success: false, error: 'Chỉ Admin mới có quyền kết thúc game sớm' };
+    }
+
+    try {
+      await this.gameService.forceEndGame(formattedRoomId);
+      
+      const leaderboard = await this.gameService.getRoomLeaderboard(formattedRoomId);
+      this.server.to(formattedRoomId).emit('game_ended', {
+        leaderboard,
+      });
+
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Lỗi khi kết thúc game' };
+    }
+  }
+
+
   private async resolveAndAdvanceRound(roomId: string, round: number) {
     const result = await this.gameService.resolveRound(roomId, round);
     
@@ -204,14 +310,13 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       // Broadcast new round start
       this.server.to(roomId).emit('round_started', {
         round: room.currentRound,
-        duration: 40,
+        duration: room.roundDuration,
         macroBudget: room.macroBudget,
       });
     } else if (room && room.status === 'FINISHED') {
-      // Sort players by totalScore desc
-      const sortedPlayers = await this.gameService.getRoomPlayers(roomId);
+      const leaderboard = await this.gameService.getRoomLeaderboard(roomId);
       this.server.to(roomId).emit('game_ended', {
-        leaderboard: sortedPlayers,
+        leaderboard,
       });
     }
   }

@@ -31,12 +31,14 @@ enum ActionType {
 }
 
 model Room {
-  id           String        @id
-  status       RoomStatus    @default(LOBBY)
-  currentRound Int           @default(1)
-  maxRounds    Int           @default(5)
-  macroBudget  Float         @default(0.0)
-  createdAt    DateTime      @default(now())
+  id            String        @id
+  status        RoomStatus    @default(LOBBY)
+  currentRound  Int           @default(1)
+  maxRounds     Int           @default(5)
+  roundDuration Int           @default(40)
+  spectatorMode Boolean       @default(false)
+  macroBudget   Float         @default(0.0)
+  createdAt     DateTime      @default(now())
   
   players      Player[]
   actions      RoundAction[]
