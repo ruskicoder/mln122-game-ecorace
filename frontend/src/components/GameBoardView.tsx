@@ -3,7 +3,7 @@ import { useGame } from '../context/SocketContext';
 import { ActionType, EconomicRole, PowerupType } from '@ecorace/shared';
 import {
   Shield, Sparkles, TrendingUp, Heart, Share2, Award, Info, Users,
-  Clock, Landmark, BookOpen, X, ShieldAlert, Eye, ChevronRight, AlertTriangle, Zap, Settings
+  Clock, Landmark, BookOpen, X, ShieldAlert, Eye, ChevronRight, AlertTriangle, Zap
 } from 'lucide-react';
 
 export const GameBoardView: React.FC = () => {
@@ -32,9 +32,6 @@ export const GameBoardView: React.FC = () => {
   // Powerups local state
   const [targetingCardCode, setTargetingCardCode] = useState<string | null>(null);
   const [swapSelectedIdx, setSwapSelectedIdx] = useState<number>(0);
-
-  // Selection mode for admin interactions (Dùng Thẻ Bài vs Sửa Chỉ Số)
-  const [adminSelectionMode, setAdminSelectionMode] = useState<'powerup' | 'adjust'>('powerup');
 
   // Derived flags
   const isAdmin = player?.isAdmin ?? false;
@@ -106,7 +103,6 @@ export const GameBoardView: React.FC = () => {
         setTargetingCardCode(null);
       } else {
         setTargetingCardCode(code);
-        setAdminSelectionMode('powerup'); // Auto-switch to powerup targeting mode
       }
     } else {
       // Direct activation
@@ -476,39 +472,6 @@ export const GameBoardView: React.FC = () => {
 
         <div className="flex-1 p-4 space-y-4 overflow-y-auto">
 
-          {/* Admin Selection Mode Toggle */}
-          {isAdmin && (
-            <div className="bg-white/5 border border-white/10 rounded-xl p-3 space-y-2">
-              <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400 block">Chế độ nhấp bảng xếp hạng</span>
-              <div className="bg-black/35 rounded-xl p-1 flex">
-                <button
-                  type="button"
-                  onClick={() => setAdminSelectionMode('powerup')}
-                  className={`flex-1 py-2 rounded-lg text-xs font-bold transition flex items-center justify-center space-x-1.5 ${
-                    adminSelectionMode === 'powerup'
-                      ? 'bg-purple-600/20 border border-purple-500/30 text-purple-400 shadow-lg'
-                      : 'border border-transparent text-gray-400 hover:text-white'
-                  }`}
-                >
-                  <Zap className="w-3.5 h-3.5" />
-                  <span>Dùng Thẻ Bài</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setAdminSelectionMode('adjust')}
-                  className={`flex-1 py-2 rounded-lg text-xs font-bold transition flex items-center justify-center space-x-1.5 ${
-                    adminSelectionMode === 'adjust'
-                      ? 'bg-green-600/20 border border-green-500/30 text-green-400 shadow-lg'
-                      : 'border border-transparent text-gray-400 hover:text-white'
-                  }`}
-                >
-                  <Settings className="w-3.5 h-3.5" />
-                  <span>Sửa Điểm Admin</span>
-                </button>
-              </div>
-            </div>
-          )}
-
           {/* Quick Adjust Panel */}
           {isAdmin && (
             <div className="bg-white/5 border border-white/10 rounded-xl p-4 space-y-3">
@@ -646,19 +609,19 @@ export const GameBoardView: React.FC = () => {
                       <tr
                         key={p.id}
                         onClick={() => {
-                          if (isTargetable && adminSelectionMode === 'powerup') {
-                            handleLeaderboardTargetSelect(p.id);
-                          } else if (isAdmin && adminSelectionMode === 'adjust') {
+                          if (isAdmin) {
                             setAdjustTargetId(p.id);
+                          } else if (isTargetable) {
+                            handleLeaderboardTargetSelect(p.id);
                           }
                         }}
                         className={`transition-colors ${
-                          isTargetable && adminSelectionMode === 'powerup'
+                          isAdmin
+                            ? p.id === adjustTargetId
+                              ? 'bg-green-500/10 border-l-2 border-green-500 cursor-pointer'
+                              : 'hover:bg-white/[0.02] cursor-pointer'
+                            : isTargetable
                             ? 'hover:bg-purple-500/10 cursor-pointer bg-purple-500/5 animate-pulse'
-                            : p.id === adjustTargetId && adminSelectionMode === 'adjust'
-                            ? 'bg-green-500/10 border-l-2 border-green-500 cursor-pointer'
-                            : isAdmin && adminSelectionMode === 'adjust'
-                            ? 'hover:bg-white/[0.02] cursor-pointer'
                             : 'hover:bg-white/[0.02]'
                         }`}
                       >
@@ -1013,6 +976,106 @@ export const GameBoardView: React.FC = () => {
             <p className="text-xs text-gray-400 text-center leading-relaxed">
               Trò chơi sẽ tự động chuyển sang vòng tiếp theo khi đếm ngược kết thúc...
             </p>
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================ */}
+      {/* ADMIN CARD TARGETING LEADERBOARD POPUP                       */}
+      {/* ============================================================ */}
+      {isAdmin && targetingCardCode && (
+        <div className="fixed inset-0 bg-black/95 backdrop-blur-md z-[120] flex items-center justify-center p-4">
+          <div className="backdrop-blur-md bg-[#111625] border border-purple-500/30 rounded-2xl w-full max-w-2xl p-6 shadow-2xl space-y-4 flex flex-col max-h-[90vh]">
+            <div className="flex justify-between items-center border-b border-white/5 pb-2">
+              <div className="flex items-center space-x-2 text-purple-400">
+                <Zap className="w-5 h-5 animate-pulse" />
+                <h3 className="text-sm font-black uppercase tracking-wider">
+                  🎯 Chọn Mục Tiêu: {getPowerupInfo(targetingCardCode).name}
+                </h3>
+              </div>
+              <button 
+                onClick={() => setTargetingCardCode(null)} 
+                className="p-1 hover:bg-white/10 rounded text-gray-400 hover:text-white transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <p className="text-xs text-gray-300">
+              Hãy chọn 1 người chơi từ danh sách dưới đây làm mục tiêu cho thẻ bài:
+            </p>
+
+            <div className="flex-1 overflow-y-auto border border-purple-500/20 rounded-xl overflow-hidden">
+              <table className="w-full text-left border-collapse text-xs min-w-[360px]">
+                <thead>
+                  <tr className="text-gray-400 uppercase tracking-widest text-[9px] border-b border-white/10 bg-white/5">
+                    <th className="p-3">Người chơi</th>
+                    <th className="p-3">Vai</th>
+                    <th className="p-3">Vốn</th>
+                    <th className="p-3">HS</th>
+                    <th className="p-3">Tổng</th>
+                    <th className="p-3">ST</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-white/5">
+                  {activePlayers.map((p) => {
+                    const isSelf = p.id === player?.id;
+                    let isRoleMatch = true;
+                    if (targetingCardCode) {
+                      if (targetingCardCode === PowerupType.INFLUENCER) {
+                        isRoleMatch = p.role === EconomicRole.POE || p.role === EconomicRole.COOP || p.role === EconomicRole.HOUSEHOLD;
+                      } else if (targetingCardCode === PowerupType.USA_TAX) {
+                        isRoleMatch = p.role === EconomicRole.FDI || p.role === EconomicRole.POE;
+                      } else if (targetingCardCode === PowerupType.FDI_FLUX) {
+                        isRoleMatch = p.role === EconomicRole.FDI;
+                      }
+                    }
+                    const isTargetable = !!(
+                      p.role &&
+                      isRoleMatch &&
+                      !isSelf
+                    );
+
+                    return (
+                      <tr
+                        key={p.id}
+                        onClick={() => {
+                          if (isTargetable) {
+                            handleLeaderboardTargetSelect(p.id);
+                          }
+                        }}
+                        className={`transition-colors ${
+                          isTargetable
+                            ? 'hover:bg-purple-500/10 cursor-pointer bg-purple-500/5 animate-pulse text-purple-200'
+                            : 'opacity-40 bg-black/10'
+                        }`}
+                      >
+                        <td className="p-3 font-semibold">
+                          {p.username}
+                          {p.isAdmin && <span className="text-[8px] text-red-400 font-bold ml-1">(Admin)</span>}
+                        </td>
+                        <td className="p-3 text-[9px] uppercase font-mono text-gray-400">{p.role || '—'}</td>
+                        <td className="p-3 text-yellow-400 font-bold">{p.capital.toFixed(1)}</td>
+                        <td className="p-3 text-green-400 font-mono text-[10px]">x{p.capitalMultiplier.toFixed(1)}</td>
+                        <td className="p-3 text-red-400 font-bold">{p.totalScore.toFixed(1)}</td>
+                        <td className="p-3">
+                          <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold ${p.isOnline ? 'bg-green-500/10 text-green-400' : 'bg-gray-500/10 text-gray-400'}`}>
+                            {p.isOnline ? '●' : '○'}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            <button 
+              onClick={() => setTargetingCardCode(null)} 
+              className="w-full py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 font-bold rounded-xl transition text-xs uppercase"
+            >
+              Hủy
+            </button>
           </div>
         </div>
       )}
