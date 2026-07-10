@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { Player, Room, RoundAction, RoomStatus, EconomicRole, ActionType } from '@prisma/client';
-import { RoundCalculationResult, EconomicRole as SharedEconomicRole, ActionType as SharedActionType } from '@ecorace/shared';
+import { RoundCalculationResult, EconomicRole as SharedEconomicRole, ActionType as SharedActionType, PowerupType, PowerupNotification } from '@ecorace/shared';
 
 @Injectable()
 export class GameService {
@@ -285,6 +285,7 @@ export class GameService {
     players: Player[];
     macroBudget: number;
     macroEventTriggered?: string;
+    epicDraws?: any[];
   }> {
     const formattedRoomId = roomId.toUpperCase();
     const room = await this.prisma.room.findUnique({
@@ -489,6 +490,8 @@ export class GameService {
         currentRound: nextRound,
         status: isFinished ? RoomStatus.FINISHED : RoomStatus.PLAYING,
         macroBudget,
+        // Persist warActive if WAR has been played this game
+        warActive: room.warActive,
       },
     });
 
@@ -501,12 +504,63 @@ export class GameService {
       await this.calculateEndGameScores(formattedRoomId);
     }
 
+    // -----------------------------------------------------------------------
+    // Card drawing phase: each eligible player has a 35% chance to draw a card
+    // (skip final round — no need to draw cards you cannot use)
+    // -----------------------------------------------------------------------
+    const epicDraws: PowerupNotification[] = [];
+    if (!isFinished) {
+      const drawablePlayers = finalPlayers.filter(p => p.role !== null);
+      for (const p of drawablePlayers) {
+        if (Math.random() > 0.35) continue; // no draw this round
+        const drawn = this.rollPowerup();
+        const isEpic = drawn === PowerupType.WAR || drawn === PowerupType.TERRORIST;
+        const pPowerups = p.powerups || [];
+        if (pPowerups.length < 3) {
+          await this.prisma.player.update({
+            where: { id: p.id },
+            data: { powerups: { push: drawn } },
+          });
+          if (isEpic) {
+            epicDraws.push({
+              senderName: p.username,
+              senderRole: p.role as string | null,
+              powerupCode: drawn,
+              shieldTriggered: false,
+              isEpicDraw: true,
+            });
+          }
+        } else {
+          // Inventory full — park it as pending, let the player decide
+          await this.prisma.player.update({
+            where: { id: p.id },
+            data: { pendingPowerup: drawn },
+          });
+          if (isEpic) {
+            epicDraws.push({
+              senderName: p.username,
+              senderRole: p.role as string | null,
+              powerupCode: drawn,
+              shieldTriggered: false,
+              isEpicDraw: true,
+            });
+          }
+        }
+      }
+    }
+
+    // Re-fetch players after drawing phase so inventories are current
+    const playersAfterDraw = await this.prisma.player.findMany({
+      where: { roomId: formattedRoomId },
+    });
+
     return {
       round,
       results,
-      players: finalPlayers,
+      players: playersAfterDraw,
       macroBudget,
       macroEventTriggered,
+      epicDraws,
     };
   }
 
@@ -554,5 +608,267 @@ export class GameService {
         },
       });
     }
+  }
+
+  // -------------------------------------------------------------------------
+  // POWERUP: Roll a random card based on rarity weights
+  // -------------------------------------------------------------------------
+  private rollPowerup(): string {
+    const table: [string, number][] = [
+      [PowerupType.TREND_CATCH, 50],
+      [PowerupType.INFLUENCER,  50],
+      [PowerupType.HARDSHIP,    50],
+      [PowerupType.SHIELD,      25],
+      [PowerupType.USA_TAX,     25],
+      [PowerupType.FDI_FLUX,    25],
+      [PowerupType.PRIDE,       25],
+      [PowerupType.GLOBAL,      25],
+      [PowerupType.WAR,          9],
+      [PowerupType.TERRORIST,    1],
+    ];
+    const totalWeight = table.reduce((s, [, w]) => s + w, 0);
+    let roll = Math.random() * totalWeight;
+    for (const [code, weight] of table) {
+      roll -= weight;
+      if (roll <= 0) return code;
+    }
+    return PowerupType.TREND_CATCH;
+  }
+
+  // -------------------------------------------------------------------------
+  // POWERUP: Execute an instant card activation
+  // -------------------------------------------------------------------------
+  async usePowerup(
+    senderId: string,
+    powerupCode: string,
+    targetId?: string,
+  ): Promise<{ notification: PowerupNotification; updatedPlayers: Player[] }> {
+    const sender = await this.prisma.player.findUnique({ where: { id: senderId } });
+    if (!sender) throw new NotFoundException('Người gửi không tồn tại');
+    if (!sender.powerups.includes(powerupCode)) {
+      throw new BadRequestException('Bạn không có thẻ này trong kho');
+    }
+
+    const DOMESTIC = [EconomicRole.POE, EconomicRole.COOP, EconomicRole.HOUSEHOLD, EconomicRole.SOE, EconomicRole.WORKER];
+    const NEGATIVE_CARDS = [PowerupType.USA_TAX, PowerupType.FDI_FLUX, PowerupType.WAR, PowerupType.TERRORIST];
+
+    let target: Player | null = null;
+    if (targetId) {
+      target = await this.prisma.player.findUnique({ where: { id: targetId } });
+      if (!target) throw new NotFoundException('Người chơi mục tiêu không tồn tại');
+    }
+
+    // ----- Shield check (passive) -----------------------------------------
+    let shieldTriggered = false;
+    let damageMultiplier = 1.0;
+    if (target && NEGATIVE_CARDS.includes(powerupCode as PowerupType) && target.powerups.includes(PowerupType.SHIELD)) {
+      shieldTriggered = true;
+      damageMultiplier = 0.5;
+      // Auto-consume shield from target's inventory
+      const newInventory = target.powerups.filter((c, i) => {
+        if (c === PowerupType.SHIELD && !shieldTriggered) { shieldTriggered = true; return false; }
+        return true;
+      });
+      const shieldIdx = target.powerups.indexOf(PowerupType.SHIELD);
+      const inventoryAfterShield = [...target.powerups];
+      inventoryAfterShield.splice(shieldIdx, 1);
+      await this.prisma.player.update({
+        where: { id: target.id },
+        data: { powerups: inventoryAfterShield },
+      });
+      // Refresh target reference
+      target = await this.prisma.player.findUnique({ where: { id: targetId! } });
+    }
+
+    // ----- Apply card effects ---------------------------------------------
+    const roomId = sender.roomId;
+    const room = await this.prisma.room.findUnique({ where: { id: roomId } });
+
+    switch (powerupCode as PowerupType) {
+
+      case PowerupType.TREND_CATCH:
+        await this.prisma.player.update({
+          where: { id: senderId },
+          data: { capitalMultiplier: { increment: 0.5 } },
+        });
+        break;
+
+      case PowerupType.INFLUENCER:
+        if (!target) throw new BadRequestException('Cần chọn người chơi mục tiêu');
+        if (!target.role || !( [EconomicRole.POE, EconomicRole.COOP, EconomicRole.HOUSEHOLD] as any[] ).includes(target.role)) {
+          throw new BadRequestException('KOL chỉ hiệu quả với POE, Coop, Hộ cá thể');
+        }
+        await this.prisma.player.update({
+          where: { id: target.id },
+          data: { capital: { increment: 20.0 }, socialScore: { increment: 1.0 } },
+        });
+        break;
+
+      case PowerupType.HARDSHIP:
+        // Self: +2 welfare, ensure capital >= 50
+        await this.prisma.player.update({
+          where: { id: senderId },
+          data: {
+            welfareScore: { increment: 2.0 },
+            capital: sender.capital < 50 ? 50.0 : undefined,
+          },
+        });
+        break;
+
+      case PowerupType.SHIELD:
+        throw new BadRequestException('Lá Chắn là thẻ bị động, tự động kích hoạt khi bị tấn công');
+
+      case PowerupType.USA_TAX: {
+        if (!target) throw new BadRequestException('Cần chọn người chơi mục tiêu');
+        if (!target.role || !( [EconomicRole.FDI, EconomicRole.POE] as any[] ).includes(target.role)) {
+          throw new BadRequestException('Thuế Quan Mỹ chỉ nhắm được FDI hoặc POE');
+        }
+        const capitalCut = parseFloat((target.capital * 0.4 * damageMultiplier).toFixed(2));
+        await this.prisma.player.update({
+          where: { id: target.id },
+          data: { capital: { decrement: capitalCut } },
+        });
+        break;
+      }
+
+      case PowerupType.FDI_FLUX: {
+        if (!target) throw new BadRequestException('Cần chọn người chơi mục tiêu');
+        if (target.role !== EconomicRole.FDI) {
+          throw new BadRequestException('Biến Động FDI chỉ nhắm được doanh nghiệp FDI');
+        }
+        const capLoss = parseFloat((15.0 * damageMultiplier).toFixed(2));
+        const multLoss = parseFloat((0.2 * damageMultiplier).toFixed(2));
+        await this.prisma.player.update({
+          where: { id: target.id },
+          data: {
+            capital: { decrement: capLoss },
+            capitalMultiplier: { decrement: multLoss },
+          },
+        });
+        break;
+      }
+
+      case PowerupType.PRIDE: {
+        // Boost all domestic players in the room
+        await this.prisma.player.updateMany({
+          where: {
+            roomId,
+            role: { in: DOMESTIC },
+          },
+          data: { capital: { increment: 10.0 }, socialScore: { increment: 1.0 } },
+        });
+        break;
+      }
+
+      case PowerupType.GLOBAL:
+        if (sender.role === EconomicRole.WORKER) {
+          throw new BadRequestException('Người lao động không thể dùng Vươn Tầm Thế Giới');
+        }
+        await this.prisma.player.update({
+          where: { id: senderId },
+          data: {
+            capitalMultiplier: { increment: 0.3 },
+            totalScore: { increment: 5.0 },
+          },
+        });
+        break;
+
+      case PowerupType.WAR: {
+        // All playing players lose -10 capital (halved by shield? WAR hits everyone so no individual shield check here)
+        const warCapLoss = parseFloat((10.0 * damageMultiplier).toFixed(2));
+        await this.prisma.player.updateMany({
+          where: { roomId, role: { not: null } },
+          data: { capital: { decrement: warCapLoss } },
+        });
+        // Activate persistent WAR flag on the room
+        await this.prisma.room.update({
+          where: { id: roomId },
+          data: { warActive: true },
+        });
+        break;
+      }
+
+      case PowerupType.TERRORIST: {
+        if (!target) throw new BadRequestException('Cần chọn người chơi mục tiêu');
+        const terrorLoss = parseFloat((target.capital * 0.5 * damageMultiplier).toFixed(2));
+        await this.prisma.player.update({
+          where: { id: target.id },
+          data: { capital: { decrement: terrorLoss } },
+        });
+        break;
+      }
+    }
+
+    // Remove card from sender's inventory
+    const senderInventory = [...sender.powerups];
+    const idx = senderInventory.indexOf(powerupCode);
+    if (idx !== -1) senderInventory.splice(idx, 1);
+    await this.prisma.player.update({
+      where: { id: senderId },
+      data: { powerups: senderInventory },
+    });
+
+    const updatedPlayers = await this.getRoomPlayers(roomId);
+    const notification: PowerupNotification = {
+      senderName: sender.username,
+      senderRole: sender.role as string | null,
+      targetName: target?.username,
+      targetRole: target?.role as string | null ?? undefined,
+      powerupCode,
+      shieldTriggered,
+    };
+
+    return { notification, updatedPlayers };
+  }
+
+  // -------------------------------------------------------------------------
+  // POWERUP: Player resolves a full-inventory swap or discard
+  // -------------------------------------------------------------------------
+  async resolvePendingPowerup(
+    playerId: string,
+    choice: 'discard' | 'swap',
+    swapIndex?: number,
+  ): Promise<Player> {
+    const player = await this.prisma.player.findUnique({ where: { id: playerId } });
+    if (!player) throw new NotFoundException('Người chơi không tồn tại');
+    if (!player.pendingPowerup) throw new BadRequestException('Không có thẻ chờ xử lý');
+
+    if (choice === 'discard') {
+      return this.prisma.player.update({
+        where: { id: playerId },
+        data: { pendingPowerup: null },
+      });
+    }
+
+    // Swap: replace the card at swapIndex with the pending card
+    if (swapIndex === undefined || swapIndex < 0 || swapIndex > 2) {
+      throw new BadRequestException('Chỉ số thẻ cần thay không hợp lệ');
+    }
+    const newInventory = [...player.powerups];
+    newInventory[swapIndex] = player.pendingPowerup;
+    return this.prisma.player.update({
+      where: { id: playerId },
+      data: { powerups: newInventory, pendingPowerup: null },
+    });
+  }
+
+  // -------------------------------------------------------------------------
+  // POWERUP: Admin / Orchestrator force-awards a card to a player
+  // -------------------------------------------------------------------------
+  async adminAwardPowerup(playerId: string, powerupCode: string): Promise<Player> {
+    const player = await this.prisma.player.findUnique({ where: { id: playerId } });
+    if (!player) throw new NotFoundException('Người chơi không tồn tại');
+
+    if (player.powerups.length < 3) {
+      return this.prisma.player.update({
+        where: { id: playerId },
+        data: { powerups: { push: powerupCode } },
+      });
+    }
+    // Inventory full — park as pending
+    return this.prisma.player.update({
+      where: { id: playerId },
+      data: { pendingPowerup: powerupCode },
+    });
   }
 }

@@ -63,6 +63,7 @@ describe('GameService', () => {
             socialScore: 0.0,
             welfareScore: 0.0,
             isOnline: true,
+            powerups: [],
             actions: [
               {
                 round: 1,
@@ -93,6 +94,7 @@ describe('GameService', () => {
           laborScore: 2.0,
           socialScore: 0.0,
           welfareScore: 0.0,
+          powerups: [],
         },
       ]);
 
@@ -122,6 +124,7 @@ describe('GameService', () => {
             socialScore: 0.0,
             welfareScore: 0.0,
             isOnline: true,
+            powerups: [],
             actions: [
               {
                 round: 1,
@@ -151,6 +154,7 @@ describe('GameService', () => {
           laborScore: 0.0,
           socialScore: 2.0,
           welfareScore: 0.0,
+          powerups: [],
         },
       ]);
 

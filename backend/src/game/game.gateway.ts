@@ -69,7 +69,14 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         room,
       });
 
-      return { success: true, data: player };
+      // Option 2: Redundant push directly to joining client to prevent race conditions
+      client.emit('room_updated', {
+        roomId: formattedRoomId,
+        players,
+        room,
+      });
+
+      return { success: true, data: { player, room: room ? { ...room, players } : null } };
     } catch (err: any) {
       return { success: false, error: err.message || 'Không thể tham gia phòng' };
     }
@@ -96,15 +103,14 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     try {
+      const players = await this.gameService.startGame(formattedRoomId);
       const room = await this.gameService.getRoom(formattedRoomId);
       const duration = room ? room.roundDuration : 40;
-
-      const players = await this.gameService.startGame(formattedRoomId);
 
       this.server.to(formattedRoomId).emit('game_started', {
         roomId: formattedRoomId,
         players,
-        duration,
+        room: room ? { ...room, players } : null,
       });
 
       this.server.to(formattedRoomId).emit('round_started', {
@@ -303,6 +309,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       players: result.players,
       macroBudget: result.macroBudget,
       macroEventTriggered: result.macroEventTriggered,
+      epicDraws: result.epicDraws,
     });
 
     const room = await this.gameService.getRoom(roomId);
@@ -318,6 +325,119 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       this.server.to(roomId).emit('game_ended', {
         leaderboard,
       });
+    }
+  }
+
+  @SubscribeMessage('use_powerup')
+  async handleUsePowerup(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { roomId: string; powerupCode: string; targetId?: string },
+  ): Promise<SocketResponse> {
+    const { roomId, powerupCode, targetId } = data;
+    const formattedRoomId = roomId.toUpperCase();
+    
+    const players = await this.gameService.getRoomPlayers(formattedRoomId);
+    const self = players.find(p => p.socketId === client.id);
+    if (!self) {
+      return { success: false, error: 'Không tìm thấy thông tin người chơi' };
+    }
+
+    try {
+      const { notification, updatedPlayers } = await this.gameService.usePowerup(self.id, powerupCode, targetId);
+      const room = await this.gameService.getRoom(formattedRoomId);
+
+      // Notify all players in room of the powerup activation
+      this.server.to(formattedRoomId).emit('powerup_activated', notification);
+
+      // Sync room/player state for everyone
+      this.server.to(formattedRoomId).emit('room_updated', {
+        roomId: formattedRoomId,
+        players: updatedPlayers,
+        room,
+      });
+
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Lỗi khi sử dụng thẻ bài' };
+    }
+  }
+
+  @SubscribeMessage('resolve_pending_powerup')
+  async handleResolvePendingPowerup(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { roomId: string; choice: 'discard' | 'swap'; swapIndex?: number },
+  ): Promise<SocketResponse> {
+    const { roomId, choice, swapIndex } = data;
+    const formattedRoomId = roomId.toUpperCase();
+    
+    const players = await this.gameService.getRoomPlayers(formattedRoomId);
+    const self = players.find(p => p.socketId === client.id);
+    if (!self) {
+      return { success: false, error: 'Không tìm thấy thông tin người chơi' };
+    }
+
+    try {
+      const updatedPlayer = await this.gameService.resolvePendingPowerup(self.id, choice, swapIndex);
+      const allPlayers = await this.gameService.getRoomPlayers(formattedRoomId);
+      const room = await this.gameService.getRoom(formattedRoomId);
+
+      // Sync updated state
+      this.server.to(formattedRoomId).emit('room_updated', {
+        roomId: formattedRoomId,
+        players: allPlayers,
+        room,
+      });
+
+      return { success: true, data: updatedPlayer };
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Lỗi khi xử lý thẻ chờ' };
+    }
+  }
+
+  @SubscribeMessage('admin_award_powerup')
+  async handleAdminAwardPowerup(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { roomId: string; playerId: string; powerupCode: string },
+  ): Promise<SocketResponse> {
+    const { roomId, playerId, powerupCode } = data;
+    const formattedRoomId = roomId.toUpperCase();
+
+    const sender = await this.prismaFindPlayerBySocket(client.id);
+    if (!sender || !sender.isAdmin) {
+      return { success: false, error: 'Chỉ giảng viên mới có quyền tặng thẻ bài' };
+    }
+
+    try {
+      await this.gameService.adminAwardPowerup(playerId, powerupCode);
+      const allPlayers = await this.gameService.getRoomPlayers(formattedRoomId);
+      const room = await this.gameService.getRoom(formattedRoomId);
+
+      // Sync updated state
+      this.server.to(formattedRoomId).emit('room_updated', {
+        roomId: formattedRoomId,
+        players: allPlayers,
+        room,
+      });
+
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Lỗi khi tặng thẻ bài' };
+    }
+  }
+
+  @SubscribeMessage('get_room_state')
+  async handleGetRoomState(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { roomId: string },
+  ): Promise<SocketResponse> {
+    const { roomId } = data;
+    const formattedRoomId = roomId.toUpperCase();
+    try {
+      const room = await this.gameService.getRoom(formattedRoomId);
+      const players = await this.gameService.getRoomPlayers(formattedRoomId);
+      return { success: true, data: { room: room ? { ...room, players } : null } };
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Không thể lấy thông tin phòng' };
     }
   }
 

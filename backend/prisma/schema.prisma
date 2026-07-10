@@ -37,6 +37,7 @@ model Room {
   maxRounds     Int           @default(5)
   roundDuration Int           @default(40)
   spectatorMode Boolean       @default(false)
+  warActive     Boolean       @default(false)  // WAR card: INVEST costs +10 when true
   macroBudget   Float         @default(0.0)
   createdAt     DateTime      @default(now())
   
@@ -58,6 +59,8 @@ model Player {
   totalScore          Float         @default(0.0)
   isOnline            Boolean       @default(true)
   isAdmin             Boolean       @default(false)
+  powerups            String[]      @default([])
+  pendingPowerup      String?
   
   roomId              String
   room                Room          @relation(fields: [roomId], references: [id], onDelete: Cascade)

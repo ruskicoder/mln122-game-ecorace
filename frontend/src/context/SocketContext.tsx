@@ -20,6 +20,11 @@ interface SocketContextType {
   adminAdjustPoints: (playerId: string, capitalDelta: number, scoreDelta: number) => void;
   adminForceEndGame: () => void;
   adminSetSpectatorMode: (spectatorMode: boolean) => void;
+  usePowerup: (powerupCode: string, targetId?: string) => void;
+  resolvePendingPowerup: (choice: 'discard' | 'swap', swapIndex?: number) => void;
+  adminAwardPowerup: (playerId: string, powerupCode: string) => void;
+  lastNotification: any | null;
+  clearNotification: () => void;
   leaveRoom: () => void;
   clearError: () => void;
 }
@@ -34,6 +39,7 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [results, setResults] = useState<Record<string, RoundCalculationResult> | null>(null);
   const [leaderboard, setLeaderboard] = useState<Player[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [lastNotification, setLastNotification] = useState<any | null>(null);
 
   // socketRef gives synchronous access to the socket instance from callbacks and
   // action handlers without requiring the socket to be in the useEffect deps array.
@@ -80,19 +86,15 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           roomId: storedRoomId,
           username: '',
           playerId: storedPlayerId,
-        }, (res: SocketResponse<Player>) => {
+        }, (res: SocketResponse<{ player: Player; room: Room }>) => {
           if (res.success && res.data) {
-            setPlayer(res.data);
-            setRoom((prev) => prev ?? {
-              id: res.data!.roomId,
-              status: res.data!.role ? RoomStatus.PLAYING : RoomStatus.LOBBY,
-              currentRound: 1,
-              maxRounds: 5,
-              roundDuration: 40,
-              spectatorMode: false,
-              macroBudget: 0.0,
-              createdAt: '',
-            });
+            const rData = res.data.room;
+            setPlayer(res.data.player);
+            setRoom((prev) => ({
+              ...prev,
+              ...rData,
+              players: rData.players || prev?.players || [],
+            }));
           } else {
             localStorage.removeItem('playerId');
             localStorage.removeItem('roomId');
@@ -113,11 +115,12 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           id: data.roomId,
           status: RoomStatus.LOBBY,
           currentRound: 1,
-          maxRounds: 5,
-          roundDuration: 40,
-          spectatorMode: false,
-          macroBudget: 0.0,
-          createdAt: '',
+          maxRounds: data.room?.maxRounds ?? 5,
+          roundDuration: data.room?.roundDuration ?? 40,
+          spectatorMode: data.room?.spectatorMode ?? false,
+          warActive: data.room?.warActive ?? false,
+          macroBudget: data.room?.macroBudget ?? 0.0,
+          createdAt: data.room?.createdAt ?? '',
         };
         // Merge full room snapshot when server sends it (settings updates, join, disconnect)
         return { ...base, ...data.room, players: data.players };
@@ -130,20 +133,12 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       if (self) setPlayer(self);
     });
 
-    newSocket.on('game_started', (data: { roomId: string; players: Player[]; duration: number }) => {
-      setRoom((prev) => {
-        const base = prev ?? {
-          id: data.roomId,
-          status: RoomStatus.PLAYING,
-          currentRound: 1,
-          maxRounds: 5,
-          roundDuration: data.duration,
-          spectatorMode: false,
-          macroBudget: 0.0,
-          createdAt: '',
-        };
-        return { ...base, status: RoomStatus.PLAYING, roundDuration: data.duration, players: data.players };
-      });
+    newSocket.on('game_started', (data: { roomId: string; players: Player[]; room: Room }) => {
+      setRoom((prev) => ({
+        ...prev,
+        ...data.room,
+        players: data.players || data.room?.players || prev?.players || [],
+      }));
       const self = data.players.find(
         (p) => p.socketId === newSocket.id || p.id === playerIdRef.current,
       );
@@ -167,6 +162,7 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       players: Player[];
       macroBudget: number;
       macroEventTriggered?: string;
+      epicDraws?: any[];
     }) => {
       setResults(data.results);
       setRoom((prev) => prev ? {
@@ -176,6 +172,15 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       } : null);
       const self = data.players.find((p) => p.id === playerIdRef.current);
       if (self) setPlayer(self);
+
+      // If any epic draws (WAR, TERRORIST) occurred, highlight the first one
+      if (data.epicDraws && data.epicDraws.length > 0) {
+        setLastNotification(data.epicDraws[0]);
+      }
+    });
+
+    newSocket.on('powerup_activated', (notification: any) => {
+      setLastNotification(notification);
     });
 
     newSocket.on('game_ended', (data: { leaderboard: Player[] }) => {
@@ -187,6 +192,32 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       newSocket.close();
     };
   }, []); // Empty: socket created once, never torn down by state changes
+
+  // -----------------------------------------------------------------------
+  // Periodic background state sync (Option 3) to keep lobby and players list async-proof
+  // -----------------------------------------------------------------------
+  useEffect(() => {
+    if (!socket || !room?.id) return;
+
+    const intervalId = setInterval(() => {
+      if (socket.connected) {
+        socket.emit('get_room_state', { roomId: room.id }, (res: SocketResponse<{ room: Room }>) => {
+          if (res.success && res.data?.room) {
+            const rData = res.data.room;
+            setRoom((prev) => ({
+              ...prev,
+              ...rData,
+              players: rData.players || prev?.players || [],
+            }));
+          }
+        });
+      }
+    }, 15000);
+
+    return () => {
+      clearInterval(intervalId);
+    };
+  }, [socket, room?.id]);
 
   // -----------------------------------------------------------------------
   // Actions — all use socketRef.current so they never need socket in scope
@@ -219,8 +250,18 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         roomId: data.room.id,
         username: adminUsername,
         playerId: data.adminPlayer.id,
-      }, (socketRes: SocketResponse) => {
-        if (!socketRes.success) setError(socketRes.error || 'Lỗi khi kết nối socket');
+      }, (socketRes: SocketResponse<{ player: Player; room: Room }>) => {
+        if (!socketRes.success) {
+          setError(socketRes.error || 'Lỗi khi kết nối socket');
+        } else if (socketRes.data) {
+          const rData = socketRes.data.room;
+          setPlayer(socketRes.data.player);
+          setRoom((prev) => ({
+            ...prev,
+            ...rData,
+            players: rData.players || prev?.players || [],
+          }));
+        }
       });
     } catch (err: any) {
       setError(err.message || 'Lỗi khi tạo phòng');
@@ -239,21 +280,17 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       const s = socketRef.current;
       if (!s) { setError('Socket chưa kết nối, vui lòng thử lại'); return; }
 
-      s.emit('join_room', { roomId: formattedRoomId, username }, (res: SocketResponse<Player>) => {
+      s.emit('join_room', { roomId: formattedRoomId, username }, (res: SocketResponse<{ player: Player; room: Room }>) => {
         if (res.success && res.data) {
-          localStorage.setItem('playerId', res.data.id);
+          localStorage.setItem('playerId', res.data.player.id);
           localStorage.setItem('roomId', formattedRoomId);
-          setPlayer(res.data);
-          setRoom({
-            id: formattedRoomId,
-            status: RoomStatus.LOBBY,
-            currentRound: 1,
-            maxRounds: 5,
-            roundDuration: 40,
-            spectatorMode: false,
-            macroBudget: 0.0,
-            createdAt: '',
-          });
+          const rData = res.data.room;
+          setPlayer(res.data.player);
+          setRoom((prev) => ({
+            ...prev,
+            ...rData,
+            players: rData.players || prev?.players || [],
+          }));
         } else {
           setError(res.error || 'Lỗi khi vào phòng');
         }
@@ -344,6 +381,41 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }
   };
 
+  const usePowerup = (powerupCode: string, targetId?: string) => {
+    const s = socketRef.current;
+    const r = roomRef.current;
+    if (s && r) {
+      s.emit('use_powerup', { roomId: r.id, powerupCode, targetId }, (res: SocketResponse) => {
+        if (!res.success) setError(res.error || 'Lỗi khi sử dụng thẻ bài');
+      });
+    }
+  };
+
+  const resolvePendingPowerup = (choice: 'discard' | 'swap', swapIndex?: number) => {
+    const s = socketRef.current;
+    const r = roomRef.current;
+    if (s && r) {
+      s.emit('resolve_pending_powerup', { roomId: r.id, choice, swapIndex }, (res: SocketResponse) => {
+        if (!res.success) setError(res.error || 'Lỗi khi xử lý thẻ bài chờ');
+      });
+    }
+  };
+
+  const adminAwardPowerup = (playerId: string, powerupCode: string) => {
+    const adminToken = localStorage.getItem('adminToken');
+    const s = socketRef.current;
+    const r = roomRef.current;
+    if (s && r && adminToken) {
+      s.emit('admin_award_powerup', { roomId: r.id, playerId, powerupCode }, (res: SocketResponse) => {
+        if (!res.success) setError(res.error || 'Lỗi khi tặng thẻ bài');
+      });
+    }
+  };
+
+  const clearNotification = () => {
+    setLastNotification(null);
+  };
+
   const leaveRoom = () => {
     localStorage.removeItem('playerId');
     localStorage.removeItem('roomId');
@@ -352,6 +424,7 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setRoom(null);
     setResults(null);
     setLeaderboard(null);
+    setLastNotification(null);
   };
 
   return (
@@ -373,6 +446,11 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         adminAdjustPoints,
         adminForceEndGame,
         adminSetSpectatorMode,
+        usePowerup,
+        resolvePendingPowerup,
+        adminAwardPowerup,
+        lastNotification,
+        clearNotification,
         leaveRoom,
         clearError,
       }}

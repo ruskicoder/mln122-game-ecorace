@@ -1,20 +1,25 @@
 import React, { useState, useEffect } from 'react';
 import { useGame } from '../context/SocketContext';
-import { ActionType, EconomicRole } from '@ecorace/shared';
+import { ActionType, EconomicRole, PowerupType } from '@ecorace/shared';
 import {
   Shield, Sparkles, TrendingUp, Heart, Share2, Award, Info, Users,
-  Clock, Landmark, BookOpen, X, ShieldAlert, Eye, ChevronRight,
+  Clock, Landmark, BookOpen, X, ShieldAlert, Eye, ChevronRight, AlertTriangle, Zap, Settings
 } from 'lucide-react';
 
 export const GameBoardView: React.FC = () => {
-  const { room, player, submitAction, results, adminNextRound, adminAdjustPoints, adminForceEndGame } = useGame();
+  const {
+    room, player, submitAction, results, adminNextRound, adminAdjustPoints,
+    adminForceEndGame, usePowerup, resolvePendingPowerup, adminAwardPowerup,
+    lastNotification, clearNotification, error, clearError
+  } = useGame();
+
   const [selectedAction, setSelectedAction] = useState<ActionType | null>(null);
 
   // Dynamic timer bound to room duration
   const defaultDuration = room?.roundDuration || 40;
   const [timeLeft, setTimeLeft] = useState(defaultDuration);
 
-  // Modals
+  // Modals & Panels
   const [showHelp, setShowHelp] = useState(false);
   const [showEndConfirm, setShowEndConfirm] = useState(false);
 
@@ -22,6 +27,14 @@ export const GameBoardView: React.FC = () => {
   const [adjustTargetId, setAdjustTargetId] = useState<string>('');
   const [capitalDelta, setCapitalDelta] = useState<number>(10);
   const [scoreDelta, setScoreDelta] = useState<number>(1);
+  const [adminAwardCardCode, setAdminAwardCardCode] = useState<string>('');
+
+  // Powerups local state
+  const [targetingCardCode, setTargetingCardCode] = useState<string | null>(null);
+  const [swapSelectedIdx, setSwapSelectedIdx] = useState<number>(0);
+
+  // Selection mode for admin interactions (Dùng Thẻ Bài vs Sửa Chỉ Số)
+  const [adminSelectionMode, setAdminSelectionMode] = useState<'powerup' | 'adjust'>('powerup');
 
   // Derived flags
   const isAdmin = player?.isAdmin ?? false;
@@ -31,7 +44,9 @@ export const GameBoardView: React.FC = () => {
   useEffect(() => {
     setTimeLeft(defaultDuration);
     setSelectedAction(null);
-  }, [room?.currentRound, defaultDuration]);
+    setTargetingCardCode(null);
+    clearError();
+  }, [room?.currentRound, defaultDuration, clearError]);
 
   useEffect(() => {
     if (timeLeft <= 0) return;
@@ -48,6 +63,61 @@ export const GameBoardView: React.FC = () => {
   const handleAdjustPointsSubmit = () => {
     if (!adjustTargetId) return;
     adminAdjustPoints(adjustTargetId, capitalDelta, scoreDelta);
+  };
+
+  const handleAdminAwardPowerupSubmit = () => {
+    if (!adjustTargetId || !adminAwardCardCode) return;
+    adminAwardPowerup(adjustTargetId, adminAwardCardCode);
+    setAdminAwardCardCode('');
+  };
+
+  const getPowerupInfo = (code: string) => {
+    switch (code as PowerupType) {
+      case PowerupType.TREND_CATCH:
+        return { name: 'Bắt Trend 🚀', desc: 'Hiệu suất sản xuất: +0.5 vĩnh viễn.', color: 'border-purple-500/40 text-purple-400 bg-purple-500/10', needsTarget: false };
+      case PowerupType.INFLUENCER:
+        return { name: 'Sóng KOLs 📣', desc: 'POE/Coop/Hộ cá thể: +20.0 Vốn, +1.0 Điểm Xã hội.', color: 'border-teal-500/40 text-teal-400 bg-teal-500/10', needsTarget: true };
+      case PowerupType.HARDSHIP:
+        return { name: 'Vượt Khó 🛡️', desc: 'Nhận +2.0 Điểm Phúc lợi, bảo hiểm sàn vốn 50.0.', color: 'border-green-500/40 text-green-400 bg-green-500/10', needsTarget: false };
+      case PowerupType.SHIELD:
+        return { name: 'Lá Chắn 🛡️', desc: 'Bị động: Giảm 50% sát thương từ thẻ hại của đối thủ.', color: 'border-slate-500/40 text-slate-300 bg-slate-500/10', needsTarget: false };
+      case PowerupType.USA_TAX:
+        return { name: 'Thuế Mỹ 🇺🇸', desc: 'FDI/POE: Cắt giảm 40% doanh thu trong vòng.', color: 'border-red-500/40 text-red-400 bg-red-500/10', needsTarget: true };
+      case PowerupType.FDI_FLUX:
+        return { name: 'FDI Rút Vốn 📉', desc: 'FDI: Trừ -15.0 Vốn và -0.2 Hiệu suất sản xuất.', color: 'border-orange-500/40 text-orange-400 bg-orange-500/10', needsTarget: true };
+      case PowerupType.PRIDE:
+        return { name: 'Tự Hào VN 🇻🇳', desc: 'Tất cả người chơi nội địa: +10.0 Vốn, +1.0 Điểm Xã hội.', color: 'border-yellow-500/40 text-yellow-400 bg-yellow-500/10', needsTarget: false };
+      case PowerupType.GLOBAL:
+        return { name: 'Vươn Tầm 🌍', desc: 'Hiệu suất: +0.3, Điểm tổng: +5.0 (Trừ người lao động).', color: 'border-indigo-500/40 text-indigo-400 bg-indigo-500/10', needsTarget: false };
+      case PowerupType.WAR:
+        return { name: 'Chiến Tranh ⚔️', desc: 'Toàn bộ người chơi: -10.0 Vốn, tăng giá INVEST thêm 10.0.', color: 'border-rose-600 text-rose-400 bg-rose-950/20 animate-pulse', needsTarget: false };
+      case PowerupType.TERRORIST:
+        return { name: 'Sự Cố An Ninh ⚠️', desc: 'Mục tiêu: Đánh sập bay mất 50% tổng số Vốn hiện có.', color: 'border-lime-500/40 text-lime-400 bg-lime-500/10 font-bold', needsTarget: true };
+      default:
+        return { name: code, desc: 'Thẻ chưa xác định.', color: 'border-gray-500/40 text-gray-400 bg-gray-500/10', needsTarget: false };
+    }
+  };
+
+  const handleCardClick = (code: string) => {
+    const info = getPowerupInfo(code);
+    if (info.needsTarget) {
+      // Toggle targeting mode
+      if (targetingCardCode === code) {
+        setTargetingCardCode(null);
+      } else {
+        setTargetingCardCode(code);
+        setAdminSelectionMode('powerup'); // Auto-switch to powerup targeting mode
+      }
+    } else {
+      // Direct activation
+      usePowerup(code);
+    }
+  };
+
+  const handleLeaderboardTargetSelect = (targetPlayerId: string) => {
+    if (!targetingCardCode) return;
+    usePowerup(targetingCardCode, targetPlayerId);
+    setTargetingCardCode(null);
   };
 
   const getRoleDetails = (role: EconomicRole | null) => {
@@ -70,11 +140,12 @@ export const GameBoardView: React.FC = () => {
   };
 
   const getActionDetails = (action: ActionType) => {
+    const investCost = room?.warActive ? 40.0 : 30.0;
     switch (action) {
       case ActionType.PRODUCE:
         return { title: 'Sản xuất / Làm việc', desc: 'Tập trung sản xuất tạo ra doanh thu trực tiếp dựa trên hệ số nhân năng suất hiện tại.', effects: player?.role === EconomicRole.WORKER ? 'Vốn: +15.0, Điểm lao động: +2.0' : `Vốn: +${(20 * (player?.capitalMultiplier || 1.0)).toFixed(1)}, Đóng thuế`, icon: <TrendingUp className="w-5 h-5 text-green-400" /> };
       case ActionType.INVEST:
-        return { title: 'Đầu tư mở rộng', desc: 'Chi tiền mua thiết bị hoặc đào tạo kỹ năng để tăng vĩnh viễn hệ số nhân năng suất cho các vòng sau.', effects: player?.role === EconomicRole.WORKER ? 'Vốn: -15.0, Năng suất: +20%' : 'Vốn: -30.0, Năng suất: +30%', icon: <Sparkles className="w-5 h-5 text-yellow-400" /> };
+        return { title: 'Đầu tư mở rộng', desc: room?.warActive ? 'Chi tiền tăng năng suất (Gặp khó khăn vì Chiến tranh thương mại)' : 'Chi tiền mua thiết bị hoặc đào tạo kỹ năng để tăng vĩnh viễn hệ số nhân năng suất.', effects: player?.role === EconomicRole.WORKER ? 'Vốn: -15.0, Năng suất: +20%' : `Vốn: -${investCost.toFixed(1)}, Năng suất: +30%`, icon: <Sparkles className="w-5 h-5 text-yellow-400" /> };
       case ActionType.WELFARE:
         return { title: 'Tăng lương / Trợ cấp', desc: 'Chủ doanh nghiệp hỗ trợ cải thiện đời sống người lao động hoặc tự tăng phúc lợi xã hội.', effects: player?.role === EconomicRole.WORKER ? 'Vốn: +15.0, Điểm phúc lợi: +1.0' : 'Mất Vốn đầu tư, Đóng góp Xã hội tăng mạnh', icon: <Heart className="w-5 h-5 text-red-400" /> };
       case ActionType.OPTIMIZE:
@@ -94,6 +165,58 @@ export const GameBoardView: React.FC = () => {
       {/* MAIN GAME AREA — flex-1 */}
       {/* ============================================================ */}
       <div className="flex-1 min-w-0 flex flex-col p-4 md:p-6 overflow-y-auto">
+
+        {/* Global Live Notifications Banner */}
+        {lastNotification && (
+          <div className={`mb-4 px-4 py-3 rounded-xl border flex items-center justify-between ${
+            lastNotification.isEpicDraw
+              ? 'bg-rose-500/20 border-rose-500/40 text-rose-300 animate-pulse'
+              : 'bg-blue-600/10 border-blue-500/20 text-blue-300'
+          }`}>
+            <div className="flex items-center space-x-2 text-xs">
+              <Zap className="w-4 h-4 text-yellow-400 shrink-0" />
+              <span>
+                {lastNotification.isEpicDraw ? (
+                  <span>
+                    ⚠️ Phát hiện thẻ nguy hiểm! Người chơi <strong>{lastNotification.senderName}</strong> vừa rút được thẻ <strong>{getPowerupInfo(lastNotification.powerupCode).name}</strong>!
+                  </span>
+                ) : (
+                  <span>
+                    ⚡ <strong>{lastNotification.senderName}</strong> sử dụng thẻ <strong>{getPowerupInfo(lastNotification.powerupCode).name}</strong>
+                    {lastNotification.targetName && (
+                      <span> lên <strong>{lastNotification.targetName}</strong></span>
+                    )}
+                    {lastNotification.shieldTriggered && (
+                      <strong className="text-green-400 ml-1.5">(Lá chắn kích hoạt cản 50%)</strong>
+                    )}!
+                  </span>
+                )}
+              </span>
+            </div>
+            <button
+              onClick={clearNotification}
+              className="p-1 hover:bg-white/10 rounded text-gray-400 hover:text-white transition"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
+        {/* Global Error Banner */}
+        {error && (
+          <div className="mb-4 px-4 py-3 rounded-xl border bg-red-500/20 border-red-500/40 text-red-300 flex items-center justify-between">
+            <div className="flex items-center space-x-2 text-xs font-semibold">
+              <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
+              <span>{error}</span>
+            </div>
+            <button
+              onClick={clearError}
+              className="p-1 hover:bg-white/10 rounded text-gray-400 hover:text-white transition"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
 
         {/* Header Stats Row */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
@@ -134,6 +257,14 @@ export const GameBoardView: React.FC = () => {
             </div>
           </div>
         </div>
+
+        {/* Global War active alert banner */}
+        {room?.warActive && (
+          <div className="mb-4 bg-red-950/20 border border-red-500/30 text-red-400 rounded-xl px-4 py-2 text-xs flex items-center space-x-2 font-bold animate-pulse">
+            <AlertTriangle className="w-4 h-4 shrink-0" />
+            <span>Đang xảy ra chiến tranh thương mại! Toàn bộ hoạt động INVEST tiêu tốn thêm +10.0 Vốn.</span>
+          </div>
+        )}
 
         {/* Help Button */}
         <div className="flex justify-end mb-4">
@@ -187,6 +318,58 @@ export const GameBoardView: React.FC = () => {
                 <div className="text-xs text-gray-400 font-semibold mt-1">Sở hữu: {roleInfo.ownership}</div>
                 <p className="text-xs text-gray-300 mt-4 leading-relaxed">{roleInfo.desc}</p>
               </div>
+
+              {/* Private Powerups Inventory Block */}
+              {player && player.role && (
+                <div className="backdrop-blur-md bg-[#161a29]/90 border border-white/10 rounded-2xl p-5 space-y-4 shadow-xl">
+                  <div className="flex justify-between items-center border-b border-white/5 pb-2">
+                    <h3 className="text-xs font-black uppercase tracking-wider text-purple-400 flex items-center">
+                      <Zap className="w-4 h-4 mr-1 text-purple-400 animate-pulse" />
+                      Kho Thẻ Bài ({player.powerups?.length || 0}/3)
+                    </h3>
+                  </div>
+
+                  {player.powerups && player.powerups.length > 0 ? (
+                    <div className="grid grid-cols-1 gap-2">
+                      {player.powerups.map((code, idx) => {
+                        const info = getPowerupInfo(code);
+                        const isSelected = targetingCardCode === code;
+                        return (
+                          <button
+                            key={idx}
+                            onClick={() => handleCardClick(code)}
+                            className={`p-3 rounded-xl border text-left transition-all ${
+                              isSelected
+                                ? 'border-purple-500 bg-purple-500/20 shadow-[0_0_15px_rgba(147,51,234,0.3)] scale-[1.02]'
+                                : 'border-white/5 bg-white/5 hover:bg-white/10 hover:border-white/15'
+                            }`}
+                          >
+                            <div className="flex justify-between items-center mb-1">
+                              <span className="text-xs font-bold">{info.name}</span>
+                              {info.needsTarget && (
+                                <span className="text-[8px] bg-red-500/10 text-red-400 border border-red-500/20 px-1.5 py-0.5 rounded font-black uppercase tracking-widest">
+                                  Tấn Công
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-[10px] text-gray-400 leading-normal">{info.desc}</p>
+                            {isSelected && (
+                              <p className="text-[9px] text-yellow-400 font-bold mt-1.5 animate-pulse">
+                                🎯 Chọn 1 mục tiêu trên Bảng điểm/Lớp học để tấn công...
+                              </p>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="text-center py-6 border border-dashed border-white/10 rounded-xl bg-black/10">
+                      <p className="text-xs text-gray-500">Chưa sở hữu thẻ bài nào.</p>
+                      <p className="text-[10px] text-gray-600 mt-1">Cơ hội rút thẻ 35% ở cuối mỗi vòng đấu.</p>
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div className="backdrop-blur-md bg-white/5 border border-white/10 rounded-2xl p-5 flex-1 space-y-4">
                 <h3 className="text-sm font-bold uppercase tracking-widest text-gray-400 border-b border-white/5 pb-2">Chỉ Số Cá Nhân</h3>
@@ -266,23 +449,68 @@ export const GameBoardView: React.FC = () => {
       {/* ============================================================ */}
       {/* ADMIN SIDE PANEL — always visible for admin, fixed width      */}
       {/* ============================================================ */}
-      {isAdmin && (
-        <aside className="w-full lg:w-[400px] xl:w-[440px] shrink-0 border-t lg:border-t-0 lg:border-l border-white/10 bg-[#0d1120] flex flex-col overflow-y-auto">
+      <aside className="w-full lg:w-[400px] xl:w-[440px] shrink-0 border-t lg:border-t-0 lg:border-l border-white/10 bg-[#0d1120] flex flex-col overflow-y-auto">
 
-          {/* Panel Header */}
-          <div className="sticky top-0 bg-[#0d1120] border-b border-white/10 p-4 flex items-center space-x-2 z-10">
-            <ShieldAlert className="w-5 h-5 text-red-500 shrink-0" />
-            <div>
-              <span className="text-sm font-black uppercase tracking-wider text-red-400 block">Admin Control Board</span>
-              <span className="text-[10px] text-gray-500">
-                {isOrchestrator ? 'Orchestrator – Quan sát' : 'Người chơi + Admin'}
-              </span>
+        {/* Panel Header */}
+        <div className="sticky top-0 bg-[#0d1120] border-b border-white/10 p-4 flex items-center space-x-2 z-10">
+          {isAdmin ? (
+            <>
+              <ShieldAlert className="w-5 h-5 text-red-500 shrink-0" />
+              <div>
+                <span className="text-sm font-black uppercase tracking-wider text-red-400 block">Admin Control Board</span>
+                <span className="text-[10px] text-gray-500">
+                  {isOrchestrator ? 'Orchestrator – Quan sát' : 'Người chơi + Admin'}
+                </span>
+              </div>
+            </>
+          ) : (
+            <>
+              <Landmark className="w-5 h-5 text-blue-400 shrink-0" />
+              <div>
+                <span className="text-sm font-black uppercase tracking-wider text-blue-400 block">Bảng Xếp Hạng Trực Tiếp</span>
+                <span className="text-[10px] text-gray-500">Thành viên phòng chơi</span>
+              </div>
+            </>
+          )}
+        </div>
+
+        <div className="flex-1 p-4 space-y-4 overflow-y-auto">
+
+          {/* Admin Selection Mode Toggle */}
+          {isAdmin && (
+            <div className="bg-white/5 border border-white/10 rounded-xl p-3 space-y-2">
+              <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400 block">Chế độ nhấp bảng xếp hạng</span>
+              <div className="bg-black/35 rounded-xl p-1 flex">
+                <button
+                  type="button"
+                  onClick={() => setAdminSelectionMode('powerup')}
+                  className={`flex-1 py-2 rounded-lg text-xs font-bold transition flex items-center justify-center space-x-1.5 ${
+                    adminSelectionMode === 'powerup'
+                      ? 'bg-purple-600/20 border border-purple-500/30 text-purple-400 shadow-lg'
+                      : 'border border-transparent text-gray-400 hover:text-white'
+                  }`}
+                >
+                  <Zap className="w-3.5 h-3.5" />
+                  <span>Dùng Thẻ Bài</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAdminSelectionMode('adjust')}
+                  className={`flex-1 py-2 rounded-lg text-xs font-bold transition flex items-center justify-center space-x-1.5 ${
+                    adminSelectionMode === 'adjust'
+                      ? 'bg-green-600/20 border border-green-500/30 text-green-400 shadow-lg'
+                      : 'border border-transparent text-gray-400 hover:text-white'
+                  }`}
+                >
+                  <Settings className="w-3.5 h-3.5" />
+                  <span>Sửa Điểm Admin</span>
+                </button>
+              </div>
             </div>
-          </div>
+          )}
 
-          <div className="flex-1 p-4 space-y-4 overflow-y-auto">
-
-            {/* Quick Adjust Panel */}
+          {/* Quick Adjust Panel */}
+          {isAdmin && (
             <div className="bg-white/5 border border-white/10 rounded-xl p-4 space-y-3">
               <h4 className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Điều chỉnh chỉ số người chơi</h4>
 
@@ -326,28 +554,114 @@ export const GameBoardView: React.FC = () => {
                 <ChevronRight className="w-3.5 h-3.5" />
                 <span>Áp dụng cộng/trừ</span>
               </button>
-            </div>
 
-            {/* Live Scores Table */}
-            <div className="border border-white/10 rounded-xl overflow-hidden">
-              <div className="bg-white/5 border-b border-white/10 px-3 py-2">
-                <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Bảng điểm trực tiếp</span>
+              {/* Admin Award Powerup Interface */}
+              <div className="border-t border-white/5 pt-3 mt-2">
+                <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Tặng thẻ bài kinh tế</label>
+                <div className="flex gap-2">
+                  <select
+                    value={adminAwardCardCode}
+                    onChange={(e) => setAdminAwardCardCode(e.target.value)}
+                    className="flex-1 px-3 py-2 bg-black/40 border border-white/10 rounded-lg text-xs text-white outline-none"
+                  >
+                    <option value="">-- Chọn thẻ bài --</option>
+                    <option value="TREND_CATCH">Bắt Trend (Common)</option>
+                    <option value="INFLUENCER">Sóng KOLs (Common)</option>
+                    <option value="HARDSHIP">Vượt Khó (Common)</option>
+                    <option value="SHIELD">Lá Chắn (Rare)</option>
+                    <option value="USA_TAX">Thuế Mỹ (Rare)</option>
+                    <option value="FDI_FLUX">Biến Động FDI (Rare)</option>
+                    <option value="PRIDE">Tự Hào VN (Rare)</option>
+                    <option value="GLOBAL">Vươn Tầm (Rare)</option>
+                    <option value="WAR">Chiến Tranh (Epic)</option>
+                    <option value="TERRORIST">Sự Cố An Ninh (Mythic)</option>
+                  </select>
+                  <button
+                    onClick={handleAdminAwardPowerupSubmit}
+                    disabled={!adjustTargetId || !adminAwardCardCode}
+                    className="px-3 py-2 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white font-bold rounded-lg text-xs transition shrink-0"
+                  >
+                    Tặng
+                  </button>
+                </div>
               </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse text-xs min-w-[360px]">
-                  <thead>
-                    <tr className="text-gray-400 uppercase tracking-widest text-[9px] border-b border-white/10">
-                      <th className="p-2">Người chơi</th>
-                      <th className="p-2">Vai</th>
-                      <th className="p-2">Vốn</th>
-                      <th className="p-2">HS</th>
-                      <th className="p-2">Tổng</th>
-                      <th className="p-2">ST</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-white/5">
-                    {activePlayers.map((p) => (
-                      <tr key={p.id} className="hover:bg-white/[0.02]">
+            </div>
+          )}
+
+          {/* Live Scores Table (Acts as targeting selector when targetingCardCode is active) */}
+          <div className={`border rounded-xl overflow-hidden transition-all ${
+            targetingCardCode
+              ? 'border-purple-500 ring-2 ring-purple-500/20 shadow-[0_0_15px_rgba(168,85,247,0.15)]'
+              : 'border-white/10'
+          }`}>
+            <div className="bg-white/5 border-b border-white/10 px-3 py-2 flex justify-between items-center">
+              <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400">
+                {targetingCardCode ? '🎯 Nhấp vào hàng để CHỌN MỤC TIÊU' : 'Bảng xếp hạng trực tiếp'}
+              </span>
+              {targetingCardCode && (
+                <button
+                  onClick={() => setTargetingCardCode(null)}
+                  className="text-[9px] bg-red-500/20 text-red-400 px-1.5 py-0.5 rounded hover:bg-red-500/30 transition uppercase font-bold"
+                >
+                  Hủy
+                </button>
+              )}
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse text-xs min-w-[360px]">
+                <thead>
+                  <tr className="text-gray-400 uppercase tracking-widest text-[9px] border-b border-white/10">
+                    <th className="p-2">Người chơi</th>
+                    <th className="p-2">Vai</th>
+                    <th className="p-2">Vốn</th>
+                    <th className="p-2">HS</th>
+                    <th className="p-2">Tổng</th>
+                    <th className="p-2">ST</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-white/5">
+                  {activePlayers.map((p) => {
+                    const isSelf = p.id === player?.id;
+                    
+                    // Card-specific targeting validation matching backend rules
+                    let isRoleMatch = true;
+                    if (targetingCardCode) {
+                      if (targetingCardCode === PowerupType.INFLUENCER) {
+                        isRoleMatch = p.role === EconomicRole.POE || p.role === EconomicRole.COOP || p.role === EconomicRole.HOUSEHOLD;
+                      } else if (targetingCardCode === PowerupType.USA_TAX) {
+                        isRoleMatch = p.role === EconomicRole.FDI || p.role === EconomicRole.POE;
+                      } else if (targetingCardCode === PowerupType.FDI_FLUX) {
+                        isRoleMatch = p.role === EconomicRole.FDI;
+                      }
+                    }
+                    
+                    // A player is targetable if we're in targeting mode, they have a role (playing), matches the card criteria, and isn't self.
+                    const isTargetable = !!(
+                      targetingCardCode &&
+                      p.role &&
+                      isRoleMatch &&
+                      !isSelf
+                    );
+                    return (
+                      <tr
+                        key={p.id}
+                        onClick={() => {
+                          if (isTargetable && adminSelectionMode === 'powerup') {
+                            handleLeaderboardTargetSelect(p.id);
+                          } else if (isAdmin && adminSelectionMode === 'adjust') {
+                            setAdjustTargetId(p.id);
+                          }
+                        }}
+                        className={`transition-colors ${
+                          isTargetable && adminSelectionMode === 'powerup'
+                            ? 'hover:bg-purple-500/10 cursor-pointer bg-purple-500/5 animate-pulse'
+                            : p.id === adjustTargetId && adminSelectionMode === 'adjust'
+                            ? 'bg-green-500/10 border-l-2 border-green-500 cursor-pointer'
+                            : isAdmin && adminSelectionMode === 'adjust'
+                            ? 'hover:bg-white/[0.02] cursor-pointer'
+                            : 'hover:bg-white/[0.02]'
+                        }`}
+                      >
                         <td className="p-2 font-semibold">
                           {p.username}
                           {p.isAdmin && <span className="text-[8px] text-red-400 font-bold ml-1">(Admin)</span>}
@@ -362,13 +676,15 @@ export const GameBoardView: React.FC = () => {
                           </span>
                         </td>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
+          </div>
 
-            {/* Admin Actions */}
+          {/* Admin Actions */}
+          {isAdmin && (
             <div className="space-y-2 pb-4">
               <button
                 onClick={adminNextRound}
@@ -384,9 +700,9 @@ export const GameBoardView: React.FC = () => {
                 🛑 Kết Thúc Game Ngay Lập Tức
               </button>
             </div>
-          </div>
-        </aside>
-      )}
+          )}
+        </div>
+      </aside>
 
       {/* ============================================================ */}
       {/* HELP MODAL */}
@@ -435,7 +751,7 @@ export const GameBoardView: React.FC = () => {
                   <div className="bg-black/20 p-2.5 rounded border border-white/5">
                     <strong className="text-white">INVEST (Đầu tư):</strong><br />
                     • Lao động: Tốn <span className="text-red-400">-15.0 Vốn</span>, tăng vĩnh viễn <span className="text-green-400">+20% Hiệu suất</span>.<br />
-                    • Khác: Tốn <span className="text-red-400">-30.0 Vốn</span>, tăng vĩnh viễn <span className="text-green-400">+30% Hiệu suất</span>.
+                    • Khác: Tốn <span className="text-red-400">-30.0 Vốn</span> (hoặc <span className="text-red-400">-40.0</span> nếu đang chiến tranh), tăng vĩnh viễn <span className="text-green-400">+30% Hiệu suất</span>.
                   </div>
                   <div className="bg-black/20 p-2.5 rounded border border-white/5">
                     <strong className="text-white">WELFARE (Phúc lợi):</strong><br />
@@ -454,13 +770,110 @@ export const GameBoardView: React.FC = () => {
                 </div>
               </div>
 
-              <div className="space-y-2">
-                <span className="font-bold text-gray-300 block">Điều tiết Vĩ mô (Thuế & Trợ cấp):</span>
-                <ul className="list-disc pl-4 space-y-1 text-gray-400">
-                  <li><strong className="text-white">Thuế lũy tiến:</strong> Lao động <span className="text-yellow-400">2%</span>, COOP/Hộ kinh doanh <span className="text-yellow-400">5%</span>, FDI/SOE/POE <span className="text-yellow-400">10-20%</span>.</li>
-                  <li><strong className="text-white">Gói cứu trợ:</strong> Vốn dưới <span className="text-red-400">50.0</span> → ngân sách tự động cứu trợ <span className="text-green-400">+20.0 Vốn</span>.</li>
-                  <li><strong className="text-white">Đầu tư hạ tầng:</strong> Khi ngân sách đạt <span className="text-green-400">500.0</span>, tự động chi <span className="text-red-400">300.0</span> tăng <span className="text-green-400">+10% năng suất</span> toàn dân.</li>
-                </ul>
+              <div className="space-y-3">
+                <span className="font-bold text-gray-300 block flex items-center">
+                  <Zap className="w-4 h-4 mr-1 text-purple-400" />
+                  Hệ Thống Thẻ Bài Quyền Lực (Powerups):
+                </span>
+                
+                <div className="bg-[#161a29]/95 border border-purple-500/20 p-3.5 rounded-xl space-y-3">
+                  <p className="text-[11px] text-gray-400 leading-relaxed">
+                    • <strong>Quy tắc rút thẻ:</strong> Cuối mỗi vòng đấu, mỗi người chơi có <strong>35% cơ hội</strong> rút ngẫu nhiên 1 thẻ bài kinh tế (không áp dụng ở vòng cuối).<br />
+                    • <strong>Giới hạn kho bài:</strong> Kho tối đa chứa <strong>3 thẻ</strong>. Nếu nhận thẻ thứ 4, giao diện <strong>Trao Đổi/Hủy (Swap/Discard)</strong> sẽ xuất hiện để bạn chọn thay thế thẻ cũ hoặc bỏ thẻ mới.<br />
+                    • <strong>Điều kiện kích hoạt:</strong> Một số thẻ có thể kích hoạt trực tiếp lên bản thân (Self), một số thẻ yêu cầu chọn mục tiêu cụ thể trên <strong>Bảng Xếp Hạng Trực Tiếp</strong> (Targeted).
+                  </p>
+
+                  <div className="border-t border-white/5 pt-2.5 space-y-2">
+                    <strong className="text-yellow-400 block text-[11px] uppercase tracking-wider">Cơ chế phòng thủ Bị Động (Lá Chắn - SHIELD):</strong>
+                    <p className="text-[11px] text-gray-400 leading-relaxed">
+                      • <strong>Lá Chắn (SHIELD)</strong> là thẻ bài <strong>bị động (passive)</strong>, không thể chủ động nhấn sử dụng.<br />
+                      • Khi bạn bị nhắm mục tiêu bởi một thẻ hại (<span className="text-red-400">Thuế Mỹ</span>, <span className="text-red-400">FDI Rút Vốn</span>, hoặc <span className="text-red-400">Sự Cố An Ninh</span>), hệ thống sẽ <strong>tự động tiêu thụ 1 thẻ Lá Chắn</strong> trong kho của bạn.<br />
+                      • Khi kích hoạt, Lá Chắn sẽ <strong>giảm 50% toàn bộ thiệt hại/phạt vốn hoặc hiệu suất</strong> do thẻ đó gây ra.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-2 text-[11px]">
+                  <div className="bg-black/25 p-2.5 rounded border border-white/5 space-y-1">
+                    <div className="flex justify-between items-center">
+                      <strong className="text-white">🚀 Bắt Trend (TREND_CATCH)</strong>
+                      <span className="text-[9px] text-gray-400 px-1.5 py-0.5 rounded bg-white/5 font-mono">Tự kích hoạt | Common (50%)</span>
+                    </div>
+                    <p className="text-gray-400">Tăng vĩnh viễn <span className="text-green-400">+0.5 Hệ số sản xuất</span> cho bản thân.</p>
+                  </div>
+
+                  <div className="bg-black/25 p-2.5 rounded border border-white/5 space-y-1">
+                    <div className="flex justify-between items-center">
+                      <strong className="text-white">📣 Sóng KOLs (INFLUENCER)</strong>
+                      <span className="text-[9px] text-gray-400 px-1.5 py-0.5 rounded bg-white/5 font-mono">Chọn mục tiêu | Common (50%)</span>
+                    </div>
+                    <p className="text-gray-400">Nhắm vào 1 người chơi thuộc nhóm <strong>POE, COOP, hoặc Hộ cá thể</strong>. Cộng ngay <span className="text-green-400">+20.0 Vốn</span> và <span className="text-green-400">+1.0 Điểm Đóng góp Xã hội</span> cho họ.</p>
+                  </div>
+
+                  <div className="bg-black/25 p-2.5 rounded border border-white/5 space-y-1">
+                    <div className="flex justify-between items-center">
+                      <strong className="text-white">🛡️ Vượt Khó (HARDSHIP)</strong>
+                      <span className="text-[9px] text-gray-400 px-1.5 py-0.5 rounded bg-white/5 font-mono">Tự kích hoạt | Common (50%)</span>
+                    </div>
+                    <p className="text-gray-400">Nhận <span className="text-green-400">+2.0 Điểm Phúc lợi</span>. Nếu Vốn hiện tại dưới 50.0, bảo hiểm tự động khôi phục sàn vốn của bạn về đúng <span className="text-green-400">50.0</span>.</p>
+                  </div>
+
+                  <div className="bg-black/25 p-2.5 rounded border border-white/5 space-y-1">
+                    <div className="flex justify-between items-center">
+                      <strong className="text-white">🛡️ Lá Chắn (SHIELD)</strong>
+                      <span className="text-[9px] text-purple-400 px-1.5 py-0.5 rounded bg-purple-500/10 border border-purple-500/20 font-mono font-bold">Bị động tự động | Rare (25%)</span>
+                    </div>
+                    <p className="text-gray-400">Tự động tiêu thụ khi bị người khác tấn công để cản 50% sát thương nhận vào.</p>
+                  </div>
+
+                  <div className="bg-black/25 p-2.5 rounded border border-white/5 space-y-1">
+                    <div className="flex justify-between items-center">
+                      <strong className="text-white">🇺🇸 Thuế Mỹ (USA_TAX)</strong>
+                      <span className="text-[9px] text-red-400 px-1.5 py-0.5 rounded bg-red-500/10 border border-red-500/20 font-mono font-bold">Chọn mục tiêu | Rare (25%)</span>
+                    </div>
+                    <p className="text-gray-400">Tấn công nhắm vào <strong>FDI hoặc POE</strong>. Trực tiếp cắt giảm <span className="text-red-400">-40% tổng số Vốn hiện có</span> của mục tiêu (chùi mất 20% nếu đối thủ có Lá Chắn).</p>
+                  </div>
+
+                  <div className="bg-black/25 p-2.5 rounded border border-white/5 space-y-1">
+                    <div className="flex justify-between items-center">
+                      <strong className="text-white">📉 FDI Rút Vốn (FDI_FLUX)</strong>
+                      <span className="text-[9px] text-red-400 px-1.5 py-0.5 rounded bg-red-500/10 border border-red-500/20 font-mono font-bold">Chọn mục tiêu | Rare (25%)</span>
+                    </div>
+                    <p className="text-gray-400">Tấn công chỉ nhắm được vào <strong>FDI</strong>. Trừ ngay <span className="text-red-400">-15.0 Vốn</span> và <span className="text-red-400">-0.2 Hệ số sản xuất</span> (giảm một nửa nếu có Lá Chắn).</p>
+                  </div>
+
+                  <div className="bg-black/25 p-2.5 rounded border border-white/5 space-y-1">
+                    <div className="flex justify-between items-center">
+                      <strong className="text-white">🇻🇳 Tự Hào VN (PRIDE)</strong>
+                      <span className="text-[9px] text-gray-400 px-1.5 py-0.5 rounded bg-white/5 font-mono">Tự kích hoạt | Rare (25%)</span>
+                    </div>
+                    <p className="text-gray-400">Cộng ngay <span className="text-green-400">+10.0 Vốn</span> và <span className="text-green-400">+1.0 Điểm Xã hội</span> cho toàn bộ người chơi nội địa (SOE, POE, COOP, Hộ cá thể, Lao động) trong phòng.</p>
+                  </div>
+
+                  <div className="bg-black/25 p-2.5 rounded border border-white/5 space-y-1">
+                    <div className="flex justify-between items-center">
+                      <strong className="text-white">🌍 Vươn Tầm (GLOBAL)</strong>
+                      <span className="text-[9px] text-gray-400 px-1.5 py-0.5 rounded bg-white/5 font-mono">Tự kích hoạt | Rare (25%)</span>
+                    </div>
+                    <p className="text-gray-400">Không thể dùng bởi Lao Động. Cộng ngay <span className="text-green-400">+0.3 Hệ số sản xuất</span> và <span className="text-green-400">+5.0 Điểm tổng kết vĩnh viễn</span>.</p>
+                  </div>
+
+                  <div className="bg-black/25 p-2.5 rounded border border-white/5 space-y-1">
+                    <div className="flex justify-between items-center">
+                      <strong className="text-white">⚔️ Chiến Tranh (WAR)</strong>
+                      <span className="text-[9px] text-orange-400 px-1.5 py-0.5 rounded bg-orange-500/10 border border-orange-500/20 font-mono font-bold">Toàn phòng | Epic (9%)</span>
+                    </div>
+                    <p className="text-gray-400">Tất cả người chơi bị trừ <span className="text-red-400">-10.0 Vốn</span>. Kích hoạt trạng thái chiến tranh vĩ mô: Tăng giá của lệnh INVEST thêm <span className="text-red-400">+10.0 Vốn</span> cho phần còn lại của trận đấu.</p>
+                  </div>
+
+                  <div className="bg-black/25 p-2.5 rounded border border-white/5 space-y-1">
+                    <div className="flex justify-between items-center">
+                      <strong className="text-white">⚠️ Sự Cố An Ninh (TERRORIST)</strong>
+                      <span className="text-[9px] text-red-500 px-1.5 py-0.5 rounded bg-red-500/20 border border-red-500/30 font-mono font-black animate-pulse">Chọn mục tiêu | Mythic (1%)</span>
+                    </div>
+                    <p className="text-gray-400">Tấn công cực mạnh vào bất kỳ đối thủ nào. Trực tiếp tiêu diệt <span className="text-red-400">-50% tổng số Vốn tích lũy</span> của họ (chỉ mất 25% nếu đối thủ có Lá Chắn).</p>
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -496,6 +909,68 @@ export const GameBoardView: React.FC = () => {
                 className="flex-1 py-2.5 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl text-xs transition"
               >
                 Xác nhận kết thúc
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================ */}
+      {/* FULL INVENTORY SWAP MODAL */}
+      {/* ============================================================ */}
+      {player?.pendingPowerup && (
+        <div className="fixed inset-0 bg-black/95 backdrop-blur-md z-[110] flex items-center justify-center p-4">
+          <div className="backdrop-blur-md bg-[#111625] border border-purple-500/30 rounded-2xl w-full max-w-md p-6 shadow-2xl space-y-4">
+            <div className="flex items-center space-x-2 text-purple-400">
+              <Zap className="w-6 h-6 animate-pulse" />
+              <h3 className="text-sm font-black uppercase tracking-wider">Kho thẻ bài đã đầy! (Tối đa 3)</h3>
+            </div>
+            <p className="text-xs text-gray-300 leading-relaxed">
+              Bạn vừa nhận thêm thẻ <strong>{getPowerupInfo(player.pendingPowerup).name}</strong>, nhưng kho chỉ chứa được tối đa 3 thẻ. Hãy chọn bỏ thẻ bài này hoặc chọn một thẻ cũ để trao đổi.
+            </p>
+
+            {/* Display newly drawn card */}
+            <div className="bg-purple-950/20 border border-purple-500/20 p-3 rounded-xl">
+              <span className="text-[9px] uppercase tracking-widest text-purple-400 font-bold block mb-1">Thẻ bài mới nhận</span>
+              <strong className="text-xs text-white">{getPowerupInfo(player.pendingPowerup).name}</strong>
+              <p className="text-[10px] text-gray-400 mt-1">{getPowerupInfo(player.pendingPowerup).desc}</p>
+            </div>
+
+            {/* Existing inventory options */}
+            <div className="space-y-2">
+              <span className="text-[9px] uppercase tracking-widest text-gray-400 font-bold block">Chọn thẻ cũ muốn thay thế</span>
+              {player.powerups && player.powerups.map((code, idx) => (
+                <button
+                  key={idx}
+                  onClick={() => setSwapSelectedIdx(idx)}
+                  className={`w-full p-2.5 rounded-xl border text-left text-xs transition-all ${
+                    swapSelectedIdx === idx
+                      ? 'border-purple-500 bg-purple-500/10 font-bold'
+                      : 'border-white/5 bg-white/5 hover:bg-white/10'
+                  }`}
+                >
+                  <div className="flex justify-between items-center">
+                    <span>{idx + 1}. {getPowerupInfo(code).name}</span>
+                    {swapSelectedIdx === idx && <span className="text-purple-400 text-[10px]">Đổi thẻ này</span>}
+                  </div>
+                  <p className="text-[10px] text-gray-400 mt-0.5 font-normal">{getPowerupInfo(code).desc}</p>
+                </button>
+              ))}
+            </div>
+
+            {/* Swap & Discard Controls */}
+            <div className="flex gap-2 pt-2">
+              <button
+                onClick={() => resolvePendingPowerup('discard')}
+                className="flex-1 py-2 bg-white/5 hover:bg-white/10 border border-white/5 text-gray-300 font-bold rounded-xl text-xs transition uppercase"
+              >
+                Hủy thẻ bài mới
+              </button>
+              <button
+                onClick={() => resolvePendingPowerup('swap', swapSelectedIdx)}
+                className="flex-1 py-2 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded-xl text-xs transition uppercase shadow-lg shadow-purple-600/20"
+              >
+                Đồng ý trao đổi
               </button>
             </div>
           </div>

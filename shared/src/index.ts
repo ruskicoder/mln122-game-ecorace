@@ -21,6 +21,23 @@ export enum ActionType {
   SOCIAL = 'SOCIAL',           // Đóng góp quỹ xã hội
 }
 
+export enum PowerupType {
+  // Common (50% roll weight)
+  TREND_CATCH = 'TREND_CATCH',   // Bắt Trend: +0.5 capitalMultiplier (self)
+  INFLUENCER  = 'INFLUENCER',    // Sóng KOLs: +20 capital +1 social (POE/Coop/Household)
+  HARDSHIP    = 'HARDSHIP',      // Vượt Khó: +2 welfare, floor capital at 50 (self/Coop)
+  // Rare (25% roll weight)
+  SHIELD      = 'SHIELD',        // Lá Chắn: passive, auto-blocks 50% of incoming negative cards
+  USA_TAX     = 'USA_TAX',       // Thuế Quan Mỹ: cuts target yield by 40% (FDI/POE)
+  FDI_FLUX    = 'FDI_FLUX',      // Biến Động FDI: -15 capital -0.2 multiplier (FDI)
+  PRIDE       = 'PRIDE',         // Tự Hào VN: +10 capital +1 social to all domestic roles
+  GLOBAL      = 'GLOBAL',        // Vươn Tầm: +0.3 multiplier +5 totalScore (non-worker self)
+  // Epic (9% roll weight)
+  WAR         = 'WAR',           // Chiến Tranh: all players -10 capital, INVEST cost +10
+  // Mythic (1% roll weight)
+  TERRORIST   = 'TERRORIST',     // Sự Cố An Ninh: target loses 50% capital
+}
+
 export interface Player {
   id: string;
   socketId: string;
@@ -36,6 +53,8 @@ export interface Player {
   isOnline: boolean;
   isAdmin: boolean;
   roomId: string;
+  powerups: string[];          // Current card inventory (max 3)
+  pendingPowerup: string | null; // New card waiting for swap/discard decision
 }
 
 export interface Room {
@@ -45,6 +64,7 @@ export interface Room {
   maxRounds: number;
   roundDuration: number;
   spectatorMode: boolean;
+  warActive: boolean;
   macroBudget: number;
   createdAt: Date | string;
   players?: Player[];
@@ -74,6 +94,16 @@ export interface RoundCalculationResult {
   taxPaid: number;
   welfareReceived: number;
   welfareScoreBonus: number;
+}
+
+export interface PowerupNotification {
+  senderName: string;
+  senderRole: string | null;
+  targetName?: string;
+  targetRole?: string | null;
+  powerupCode: string;
+  shieldTriggered: boolean;
+  isEpicDraw?: boolean; // true for War/Terrorist draws — broadcast to all
 }
 
 export interface SocketResponse<T = any> {

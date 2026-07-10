@@ -359,6 +359,36 @@ export const LobbyView: React.FC = () => {
                 </ul>
               </div>
 
+              {/* Powerups Rules */}
+              <div className="bg-yellow-500/5 border border-yellow-500/10 p-3 rounded-xl">
+                <span className="font-bold text-yellow-400 flex items-center mb-1">
+                  ⚡ Hệ Thống Thẻ Bài Quyền Lực (Powerups):
+                </span>
+                <ul className="list-disc pl-4 space-y-1.5 text-gray-400 text-[11px]">
+                  <li>
+                    <strong className="text-white">Cơ chế rút thẻ</strong>: Cuối mỗi vòng chơi, mỗi người chơi có <span className="text-yellow-400">30% cơ hội</span> nhận ngẫu nhiên một thẻ bài (không rút ở vòng cuối).
+                  </li>
+                  <li>
+                    <strong className="text-white">Giới hạn bài trên tay</strong>: Tối đa <span className="text-yellow-400">3 thẻ</span>. Nếu rút được thẻ thứ 4, hệ thống sẽ mở bảng lựa chọn yêu cầu bạn <span className="text-yellow-400">Hủy (Discard)</span> thẻ mới hoặc <span className="text-yellow-400">Đổi (Swap)</span> với thẻ đang có.
+                  </li>
+                  <li>
+                    <strong className="text-white">Cơ chế nhắm mục tiêu (Target)</strong>: Một số thẻ bài yêu cầu chọn người chơi chịu ảnh hưởng. Bạn cần chọn mục tiêu bằng cách nhấp chọn người chơi trên bảng xếp hạng ở góc phải khi chơi.
+                  </li>
+                  <li>
+                    <strong className="text-white">Lá chắn bảo vệ (SHIELD Passive)</strong>: Nếu bạn sở hữu thẻ <span className="text-blue-400">Lá Chắn (SHIELD)</span> trên tay khi bị người khác tấn công (bởi Thuế Mỹ, Sự Cố An Ninh...), Lá Chắn sẽ <span className="text-green-400">tự động kích hoạt</span> để giảm 50% thiệt hại và tự hủy sau đó.
+                  </li>
+                  <li>
+                    <strong className="text-white">Các loại thẻ đặc biệt</strong>:
+                    <ul className="list-circle pl-4 mt-1 space-y-1">
+                      <li><strong className="text-white">Chiến tranh (WAR - Epic)</strong>: Tất cả người chơi mất 10 Vốn, phí Đầu Tư tăng 10 Vốn trong suốt game.</li>
+                      <li><strong className="text-white">Sự cố an ninh (TERRORIST - Mythic)</strong>: Mục tiêu mất 50% tổng số Vốn hiện có.</li>
+                      <li><strong className="text-white">Thuế quan Mỹ (USA_TAX)</strong>: Giảm 40% Vốn của mục tiêu (chỉ nhắm FDI/POE).</li>
+                      <li><strong className="text-white">Tự hào VN (PRIDE)</strong>: Tăng 10 Vốn, +1 điểm xã hội cho tất cả người chơi trong nước.</li>
+                    </ul>
+                  </li>
+                </ul>
+              </div>
+
             </div>
           </div>
           
