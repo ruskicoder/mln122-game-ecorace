@@ -10,7 +10,7 @@ export const GameBoardView: React.FC = () => {
   const {
     room, player, submitAction, results, adminNextRound, adminAdjustPoints,
     adminForceEndGame, usePowerup, resolvePendingPowerup, adminAwardPowerup,
-    lastNotification, clearNotification, error, clearError
+    lastNotification, clearNotification, error, clearError, adminUpdateSettings
   } = useGame();
 
   const [selectedAction, setSelectedAction] = useState<ActionType | null>(null);
@@ -29,9 +29,19 @@ export const GameBoardView: React.FC = () => {
   const [scoreDelta, setScoreDelta] = useState<number>(1);
   const [adminAwardCardCode, setAdminAwardCardCode] = useState<string>('');
 
+  // Live settings (admin during PLAYING)
+  const [liveMaxRounds, setLiveMaxRounds] = useState<number>(room?.maxRounds ?? 5);
+  const [liveRoundDuration, setLiveRoundDuration] = useState<number>(room?.roundDuration ?? 40);
+
   // Powerups local state
   const [targetingCardCode, setTargetingCardCode] = useState<string | null>(null);
   const [swapSelectedIdx, setSwapSelectedIdx] = useState<number>(0);
+
+  // Sync live settings form when room values change
+  useEffect(() => {
+    setLiveMaxRounds(room?.maxRounds ?? 5);
+    setLiveRoundDuration(room?.roundDuration ?? 40);
+  }, [room?.maxRounds, room?.roundDuration]);
 
   // Derived flags
   const isAdmin = player?.isAdmin ?? false;
@@ -66,6 +76,10 @@ export const GameBoardView: React.FC = () => {
     if (!adjustTargetId || !adminAwardCardCode) return;
     adminAwardPowerup(adjustTargetId, adminAwardCardCode);
     setAdminAwardCardCode('');
+  };
+
+  const handleApplyLiveSettings = () => {
+    adminUpdateSettings(liveMaxRounds, liveRoundDuration);
   };
 
   const getPowerupInfo = (code: string) => {
@@ -548,6 +562,47 @@ export const GameBoardView: React.FC = () => {
                   </button>
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* Live Settings (admin only, during PLAYING) */}
+          {isAdmin && room?.status === 'PLAYING' && (
+            <div className="bg-white/5 border border-white/10 rounded-xl p-4 space-y-3">
+              <h4 className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Cài đặt vòng đấu (Trực tiếp)</h4>
+
+              <div>
+                <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">
+                  Số vòng tối đa (tối thiểu: {room.currentRound + 1})
+                </label>
+                <input
+                  type="number"
+                  min={room.currentRound + 1}
+                  value={liveMaxRounds}
+                  onChange={(e) => setLiveMaxRounds(parseInt(e.target.value) || room.currentRound + 1)}
+                  className="w-full px-2 py-1.5 bg-black/40 border border-white/10 rounded-lg text-xs text-white outline-none"
+                />
+                <p className="text-[9px] text-gray-500 mt-0.5">Hiện tại: vòng {room.currentRound}/{room.maxRounds}</p>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Thời gian mỗi vòng (giây)</label>
+                <input
+                  type="number"
+                  min={10}
+                  value={liveRoundDuration}
+                  onChange={(e) => setLiveRoundDuration(parseInt(e.target.value) || 10)}
+                  className="w-full px-2 py-1.5 bg-black/40 border border-white/10 rounded-lg text-xs text-white outline-none"
+                />
+                <p className="text-[9px] text-gray-500 mt-0.5">Tối thiểu 10 giây</p>
+              </div>
+
+              <button
+                onClick={handleApplyLiveSettings}
+                className="w-full py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-lg text-xs transition flex items-center justify-center space-x-1"
+              >
+                <ChevronRight className="w-3.5 h-3.5" />
+                <span>Áp dụng cài đặt</span>
+              </button>
             </div>
           )}
 

@@ -39,6 +39,20 @@ export class GameService {
     spectatorMode?: boolean,
   ): Promise<Room> {
     const formattedRoomId = roomId.toUpperCase();
+    const room = await this.prisma.room.findUnique({ where: { id: formattedRoomId } });
+    if (!room) throw new NotFoundException('Phòng chơi không tồn tại');
+
+    if (room.status === RoomStatus.PLAYING) {
+      if (maxRounds < room.currentRound + 1) {
+        throw new BadRequestException(
+          `Số vòng tối đa không thể ít hơn ${room.currentRound + 1} (vòng hiện tại + 1)`,
+        );
+      }
+      if (roundDuration < 10) {
+        throw new BadRequestException('Thời gian mỗi vòng tối thiểu là 10 giây');
+      }
+    }
+
     return this.prisma.room.update({
       where: { id: formattedRoomId },
       data: {
