@@ -24,11 +24,11 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   constructor(private readonly gameService: GameService) {}
 
   async handleConnection(client: Socket) {
-    console.log(`Client connected: ${client.id}`);
+    console.log(`[gateway] Client connected: ${client.id}`);
   }
 
   async handleDisconnect(client: Socket) {
-    console.log(`Client disconnected: ${client.id}`);
+    console.log(`[gateway] Client disconnected: ${client.id}`);
     const player = await this.gameService.disconnectPlayer(client.id);
     if (player) {
       this.server.to(player.roomId).emit('room_updated', {
@@ -78,15 +78,22 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   ): Promise<SocketResponse> {
     const { roomId } = data;
     const formattedRoomId = roomId.toUpperCase();
-    
-    const player = await this.prismaFindPlayerBySocket(client.id);
+
+    // Primary lookup: by current socket id (works after join_room is processed)
+    let player = await this.prismaFindPlayerBySocket(client.id);
+    // Fallback: find admin player by roomId (handles socketId-update race condition)
+    if (!player || !player.isAdmin) {
+      player = await this.gameService.getRoomAdminPlayer(formattedRoomId);
+    }
+    console.log(`[gateway] admin_start_game | socket=${client.id} | player=${JSON.stringify(player?.id)} | isAdmin=${player?.isAdmin}`);
+
     if (!player || !player.isAdmin) {
       return { success: false, error: 'Chỉ Admin mới có quyền bắt đầu game' };
     }
 
     try {
       const players = await this.gameService.startGame(formattedRoomId);
-      
+
       this.server.to(formattedRoomId).emit('game_started', {
         roomId: formattedRoomId,
         players,
@@ -157,7 +164,12 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const { roomId } = data;
     const formattedRoomId = roomId.toUpperCase();
 
-    const player = await this.prismaFindPlayerBySocket(client.id);
+    let player = await this.prismaFindPlayerBySocket(client.id);
+    if (!player || !player.isAdmin) {
+      player = await this.gameService.getRoomAdminPlayer(formattedRoomId);
+    }
+    console.log(`[gateway] admin_next_round | socket=${client.id} | player=${JSON.stringify(player?.id)} | isAdmin=${player?.isAdmin}`);
+
     if (!player || !player.isAdmin) {
       return { success: false, error: 'Chỉ Admin mới có quyền chuyển vòng' };
     }

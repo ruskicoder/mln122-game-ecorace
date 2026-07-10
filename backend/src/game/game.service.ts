@@ -20,6 +20,12 @@ export class GameService {
     });
   }
 
+  async getRoomAdminPlayer(roomId: string): Promise<Player | null> {
+    return this.prisma.player.findFirst({
+      where: { roomId: roomId.toUpperCase(), isAdmin: true },
+    });
+  }
+
   async getRoom(roomId: string): Promise<Room | null> {
     return this.prisma.room.findUnique({
       where: { id: roomId },

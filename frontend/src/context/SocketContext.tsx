@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
 import type { Player, Room, RoundCalculationResult, SocketResponse } from '@ecorace/shared';
 import { ActionType, RoomStatus } from '@ecorace/shared';
@@ -31,22 +31,43 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [leaderboard, setLeaderboard] = useState<Player[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Extract socket connection URL from window location
-  const socketUrl = window.location.origin;
+  // socketRef gives synchronous access to the socket instance from callbacks and
+  // action handlers without requiring the socket to be in the useEffect deps array.
+  const socketRef = useRef<Socket | null>(null);
 
+  // playerIdRef gives event handlers access to the current player id without
+  // stale closures — no need to re-register handlers when player changes.
+  const playerIdRef = useRef<string | null>(null);
   useEffect(() => {
-    const newSocket = io(socketUrl, {
+    playerIdRef.current = player?.id ?? null;
+  }, [player?.id]);
+
+  // roomRef allows submitAction / adminNextRound to always read current room.
+  const roomRef = useRef<Room | null>(null);
+  useEffect(() => {
+    roomRef.current = room;
+  }, [room]);
+
+  // -----------------------------------------------------------------------
+  // Socket lifecycle — created ONCE on mount. Never recreated.
+  // -----------------------------------------------------------------------
+  useEffect(() => {
+    const newSocket = io({
+      // No explicit URL: socket.io-client connects to window.location.origin
+      // (port 5173 in dev), and Vite proxies /socket.io/* → localhost:3000
       autoConnect: true,
-      transports: ['websocket'],
+      transports: ['polling', 'websocket'],
+      path: '/socket.io',
     });
 
+    socketRef.current = newSocket;
     setSocket(newSocket);
 
     newSocket.on('connect', () => {
       setIsConnected(true);
-      console.log('Socket connected:', newSocket.id);
+      console.log('[socket] connected:', newSocket.id);
 
-      // Reconnect if local storage contains session parameters
+      // On page refresh: re-join the room the player was already in
       const storedPlayerId = localStorage.getItem('playerId');
       const storedRoomId = localStorage.getItem('roomId');
 
@@ -58,16 +79,15 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         }, (res: SocketResponse<Player>) => {
           if (res.success && res.data) {
             setPlayer(res.data);
-            setRoom({
-              id: res.data.roomId,
-              status: res.data.role ? RoomStatus.PLAYING : RoomStatus.LOBBY,
+            setRoom((prev) => prev ?? {
+              id: res.data!.roomId,
+              status: res.data!.role ? RoomStatus.PLAYING : RoomStatus.LOBBY,
               currentRound: 1,
               maxRounds: 5,
               macroBudget: 0.0,
               createdAt: '',
             });
           } else {
-            // Clean stale local storage keys
             localStorage.removeItem('playerId');
             localStorage.removeItem('roomId');
             localStorage.removeItem('adminToken');
@@ -78,12 +98,12 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
     newSocket.on('disconnect', () => {
       setIsConnected(false);
-      console.log('Socket disconnected');
+      console.log('[socket] disconnected');
     });
 
     newSocket.on('room_updated', (data: { roomId: string; players: Player[] }) => {
       setRoom((prev) => {
-        const base = prev || {
+        const base = prev ?? {
           id: data.roomId,
           status: RoomStatus.LOBBY,
           currentRound: 1,
@@ -94,14 +114,16 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         return { ...base, players: data.players };
       });
 
-      // Synchronize own player object
-      const self = data.players.find(p => p.socketId === newSocket.id || (player && p.id === player.id));
+      // Keep own player object in sync (use ref, no stale closure)
+      const self = data.players.find(
+        (p) => p.socketId === newSocket.id || p.id === playerIdRef.current,
+      );
       if (self) setPlayer(self);
     });
 
     newSocket.on('game_started', (data: { roomId: string; players: Player[]; duration: number }) => {
       setRoom((prev) => {
-        const base = prev || {
+        const base = prev ?? {
           id: data.roomId,
           status: RoomStatus.PLAYING,
           currentRound: 1,
@@ -111,8 +133,9 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         };
         return { ...base, status: RoomStatus.PLAYING, players: data.players };
       });
-
-      const self = data.players.find(p => p.socketId === newSocket.id || (player && p.id === player.id));
+      const self = data.players.find(
+        (p) => p.socketId === newSocket.id || p.id === playerIdRef.current,
+      );
       if (self) setPlayer(self);
       setResults(null);
       setLeaderboard(null);
@@ -124,7 +147,7 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     });
 
     newSocket.on('action_submitted', () => {
-      // Informational socket notification triggers visual state update of players
+      // Triggers re-render so UI can reflect submitted status of other players
     });
 
     newSocket.on('round_ended', (data: {
@@ -140,8 +163,7 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         players: data.players,
         macroBudget: data.macroBudget,
       } : null);
-
-      const self = data.players.find(p => player && p.id === player.id);
+      const self = data.players.find((p) => p.id === playerIdRef.current);
       if (self) setPlayer(self);
     });
 
@@ -153,7 +175,11 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     return () => {
       newSocket.close();
     };
-  }, [player?.id]);
+  }, []); // Empty: socket created once, never torn down by state changes
+
+  // -----------------------------------------------------------------------
+  // Actions — all use socketRef.current so they never need socket in scope
+  // -----------------------------------------------------------------------
 
   const clearError = () => setError(null);
 
@@ -166,9 +192,7 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         body: JSON.stringify({ adminUsername }),
       });
       const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.message || 'Lỗi khi tạo phòng');
-      }
+      if (!res.ok) throw new Error(data.message || 'Lỗi khi tạo phòng');
 
       localStorage.setItem('playerId', data.adminPlayer.id);
       localStorage.setItem('roomId', data.room.id);
@@ -177,17 +201,16 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       setPlayer(data.adminPlayer);
       setRoom(data.room);
 
-      if (socket) {
-        socket.emit('join_room', {
-          roomId: data.room.id,
-          username: adminUsername,
-          playerId: data.adminPlayer.id,
-        }, (socketRes: SocketResponse) => {
-          if (!socketRes.success) {
-            setError(socketRes.error || 'Lỗi khi kết nối socket');
-          }
-        });
-      }
+      const s = socketRef.current;
+      if (!s) { setError('Socket chưa kết nối, vui lòng thử lại'); return; }
+
+      s.emit('join_room', {
+        roomId: data.room.id,
+        username: adminUsername,
+        playerId: data.adminPlayer.id,
+      }, (socketRes: SocketResponse) => {
+        if (!socketRes.success) setError(socketRes.error || 'Lỗi khi kết nối socket');
+      });
     } catch (err: any) {
       setError(err.message || 'Lỗi khi tạo phòng');
     }
@@ -197,75 +220,64 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     try {
       setError(null);
       const formattedRoomId = roomId.toUpperCase();
-      
+
       const validateRes = await fetch(`/api/room/validate/${formattedRoomId}`);
       const validateData = await validateRes.json();
-      if (!validateRes.ok) {
-        throw new Error(validateData.message || 'Mã phòng không hợp lệ');
-      }
+      if (!validateRes.ok) throw new Error(validateData.message || 'Mã phòng không hợp lệ');
 
-      if (socket) {
-        socket.emit('join_room', {
-          roomId: formattedRoomId,
-          username,
-        }, (res: SocketResponse<Player>) => {
-          if (res.success && res.data) {
-            localStorage.setItem('playerId', res.data.id);
-            localStorage.setItem('roomId', formattedRoomId);
-            setPlayer(res.data);
-            setRoom({
-              id: formattedRoomId,
-              status: RoomStatus.LOBBY,
-              currentRound: 1,
-              maxRounds: 5,
-              macroBudget: 0.0,
-              createdAt: '',
-            });
-          } else {
-            setError(res.error || 'Lỗi khi vào phòng');
-          }
-        });
-      }
+      const s = socketRef.current;
+      if (!s) { setError('Socket chưa kết nối, vui lòng thử lại'); return; }
+
+      s.emit('join_room', { roomId: formattedRoomId, username }, (res: SocketResponse<Player>) => {
+        if (res.success && res.data) {
+          localStorage.setItem('playerId', res.data.id);
+          localStorage.setItem('roomId', formattedRoomId);
+          setPlayer(res.data);
+          setRoom({
+            id: formattedRoomId,
+            status: RoomStatus.LOBBY,
+            currentRound: 1,
+            maxRounds: 5,
+            macroBudget: 0.0,
+            createdAt: '',
+          });
+        } else {
+          setError(res.error || 'Lỗi khi vào phòng');
+        }
+      });
     } catch (err: any) {
       setError(err.message || 'Lỗi khi vào phòng');
     }
   };
 
   const submitAction = (actionType: ActionType) => {
-    if (socket && room && player) {
-      socket.emit('submit_action', {
-        roomId: room.id,
-        actionType,
-      }, (res: SocketResponse) => {
-        if (!res.success) {
-          setError(res.error || 'Lỗi khi gửi hành động');
-        }
+    const s = socketRef.current;
+    const r = roomRef.current;
+    if (s && r && playerIdRef.current) {
+      s.emit('submit_action', { roomId: r.id, actionType }, (res: SocketResponse) => {
+        if (!res.success) setError(res.error || 'Lỗi khi gửi hành động');
       });
     }
   };
 
   const adminStartGame = () => {
     const adminToken = localStorage.getItem('adminToken');
-    if (socket && room && adminToken) {
-      socket.emit('admin_start_game', {
-        roomId: room.id,
-      }, (res: SocketResponse) => {
-        if (!res.success) {
-          setError(res.error || 'Lỗi khi bắt đầu game');
-        }
+    const s = socketRef.current;
+    const r = roomRef.current;
+    if (s && r && adminToken) {
+      s.emit('admin_start_game', { roomId: r.id }, (res: SocketResponse) => {
+        if (!res.success) setError(res.error || 'Lỗi khi bắt đầu game');
       });
     }
   };
 
   const adminNextRound = () => {
     const adminToken = localStorage.getItem('adminToken');
-    if (socket && room && adminToken) {
-      socket.emit('admin_next_round', {
-        roomId: room.id,
-      }, (res: SocketResponse) => {
-        if (!res.success) {
-          setError(res.error || 'Lỗi khi chuyển vòng');
-        }
+    const s = socketRef.current;
+    const r = roomRef.current;
+    if (s && r && adminToken) {
+      s.emit('admin_next_round', { roomId: r.id }, (res: SocketResponse) => {
+        if (!res.success) setError(res.error || 'Lỗi khi chuyển vòng');
       });
     }
   };
@@ -306,8 +318,6 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
 export const useGame = () => {
   const context = useContext(SocketContext);
-  if (!context) {
-    throw new Error('useGame must be used within a SocketProvider');
-  }
+  if (!context) throw new Error('useGame must be used within a SocketProvider');
   return context;
 };
