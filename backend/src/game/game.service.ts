@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { Player, Room, RoundAction, RoomStatus, EconomicRole, ActionType } from '@prisma/client';
+import { Player, Room, RoundAction, RoomStatus, EconomicRole, ActionType, Partnership, PolicyVote, MarketHistory } from '@prisma/client';
 import { RoundCalculationResult, EconomicRole as SharedEconomicRole, ActionType as SharedActionType, PowerupType, PowerupNotification } from '@ecorace/shared';
 
 @Injectable()
@@ -300,6 +300,7 @@ export class GameService {
     macroBudget: number;
     macroEventTriggered?: string;
     epicDraws?: any[];
+    marketHistories: MarketHistory[];
   }> {
     const formattedRoomId = roomId.toUpperCase();
     const room = await this.prisma.room.findUnique({
@@ -323,7 +324,43 @@ export class GameService {
     const results: Record<string, RoundCalculationResult> = {};
     let macroEventTriggered: string | undefined = undefined;
 
-    // First pass: Calculate individual actions
+    // --- Calculate Dynamic Market Price ---
+    let produceCount = 0;
+    let investCount = 0;
+    for (const p of room.players) {
+      if (!p.role) continue;
+      const action = p.actions[0];
+      const actionType = action ? action.actionType : ActionType.PRODUCE;
+      if (actionType === ActionType.PRODUCE) produceCount++;
+      else if (actionType === ActionType.INVEST) investCount++;
+    }
+    const totalPlayers = room.players.filter(p => p.role !== null).length || 1;
+    const totalCung = produceCount + (investCount * 1.5);
+    const equilibrium = totalPlayers * 0.5;
+    const chenhLech = totalCung - equilibrium;
+    const oldMarketPrice = room.marketPrice ?? 100.0;
+    let newMarketPrice = oldMarketPrice * (1.0 - (chenhLech / totalPlayers) * 0.3);
+    newMarketPrice = Math.max(60.0, Math.min(150.0, newMarketPrice));
+    newMarketPrice = parseFloat(newMarketPrice.toFixed(2));
+
+    // --- Random Event Trigger ---
+    let activeEvent: string | null = null;
+    let eventDescription = '';
+    // Every 3 rounds starting round 3
+    if (round > 1 && round % 3 === 0) {
+      const eventList = [
+        { code: 'GLOBAL_CRISIS', name: 'Khủng hoảng tài chính toàn cầu' },
+        { code: 'DISASTER', name: 'Thiên tai / dịch bệnh' },
+        { code: 'COOP_SUPPORT', name: 'Chính sách ưu đãi COOP' },
+        { code: 'FDI_BOOM', name: 'Bùng nổ FDI' }
+      ];
+      const idx = Math.floor(Math.random() * eventList.length);
+      activeEvent = eventList[idx].code;
+      eventDescription = eventList[idx].name;
+      macroEventTriggered = `Sự kiện vĩ mô: ${eventDescription}`;
+    }
+
+    // First pass: Calculate individual actions and apply events
     for (const player of room.players) {
       if (!player.role) continue;
 
@@ -336,14 +373,46 @@ export class GameService {
       let welfareScoreChange = 0;
       let multiplierChange = 0;
 
-      // Core Logic Calculations
+      // Event modifiers
+      let capitalPenalty = 0;
+      let incomeMultiplier = 1.0;
+      let autoWelfare = 0;
+
+      const hasShield = (player.socialScore + player.welfareScore >= 5.0);
+      const shieldFactor = hasShield ? 0.5 : 1.0;
+
+      if (activeEvent === 'GLOBAL_CRISIS') {
+        if (player.role === EconomicRole.FDI) capitalPenalty = -player.capital * 0.25 * shieldFactor;
+        else if (player.role === EconomicRole.POE) capitalPenalty = -player.capital * 0.10 * shieldFactor;
+        else if (player.role === EconomicRole.SOE) capitalPenalty = -player.capital * 0.05 * shieldFactor;
+        else if (player.role === EconomicRole.COOP) capitalPenalty = -player.capital * 0.05 * shieldFactor;
+        else if (player.role === EconomicRole.HOUSEHOLD) capitalPenalty = -player.capital * 0.08 * shieldFactor;
+        else if (player.role === EconomicRole.WORKER) incomeMultiplier = 0.95;
+      } else if (activeEvent === 'DISASTER') {
+        if (player.role === EconomicRole.POE) capitalPenalty = -player.capital * 0.10 * shieldFactor;
+        else if (player.role === EconomicRole.COOP) capitalPenalty = -player.capital * 0.05 * shieldFactor;
+        else if (player.role === EconomicRole.HOUSEHOLD) capitalPenalty = -player.capital * 0.20 * shieldFactor;
+        else if (player.role === EconomicRole.FDI) capitalPenalty = -player.capital * 0.10 * shieldFactor;
+        else if (player.role === EconomicRole.WORKER) {
+          incomeMultiplier = 0.85;
+          autoWelfare = 10.0;
+        }
+      }
+
+      // Core Logic Calculations with Trade-offs
       switch (actionType) {
         case ActionType.PRODUCE:
           if (player.role === EconomicRole.WORKER) {
-            capitalChange = 15.0; // Salary
+            capitalChange = 15.0 * player.capitalMultiplier * incomeMultiplier; // Salary
             laborScoreChange = 2.0;
           } else {
-            capitalChange = 20.0 * player.capitalMultiplier;
+            let baseProfit = 20.0 * player.capitalMultiplier * (newMarketPrice / 100.0);
+            if (activeEvent === 'COOP_SUPPORT' && player.role === EconomicRole.COOP) {
+              baseProfit *= 1.15;
+            } else if (activeEvent === 'FDI_BOOM' && player.role === EconomicRole.POE) {
+              baseProfit *= 0.95;
+            }
+            capitalChange = baseProfit;
           }
           break;
 
@@ -352,14 +421,21 @@ export class GameService {
             capitalChange = -15.0; // Spend on training
             multiplierChange = 0.2;
           } else {
-            capitalChange = -30.0; // Invest in equipment
-            multiplierChange = 0.3;
+            // Non-worker: 20% of current capital (min 15, max 50)
+            let investCost = player.capital * 0.20;
+            if (investCost < 15.0) investCost = 15.0;
+            if (investCost > 50.0) investCost = 50.0;
+            if (room.warActive) {
+              investCost += 10.0;
+            }
+            capitalChange = -investCost;
+            multiplierChange = 0.4;
           }
           break;
 
         case ActionType.WELFARE:
           if (player.role === EconomicRole.WORKER) {
-            capitalChange = 15.0; // Support bonus received
+            capitalChange = 15.0 * player.capitalMultiplier * incomeMultiplier; // Support bonus received
             welfareScoreChange = 1.0;
           } else if (player.role === EconomicRole.COOP || player.role === EconomicRole.HOUSEHOLD) {
             capitalChange = -10.0;
@@ -388,31 +464,66 @@ export class GameService {
             capitalChange = -4.0;
             socialScoreChange = 2.0;
           } else if (player.role === EconomicRole.COOP || player.role === EconomicRole.HOUSEHOLD) {
-            capitalChange = -8.0;
-            socialScoreChange = 2.0;
+            // 15% of capital (min 8, max 20)
+            let socialCost = player.capital * 0.15;
+            if (socialCost < 8.0) socialCost = 8.0;
+            if (socialCost > 20.0) socialCost = 20.0;
+            capitalChange = -socialCost;
+            socialScoreChange = 4.0;
           } else {
-            capitalChange = -15.0; // FDI, SOE, POE
-            socialScoreChange = 3.0;
+            // 25% of capital (min 15, max 40)
+            let socialCost = player.capital * 0.25;
+            if (socialCost < 15.0) socialCost = 15.0;
+            if (socialCost > 40.0) socialCost = 40.0;
+            capitalChange = -socialCost;
+            socialScoreChange = 5.0;
           }
           break;
       }
 
-      // Calculate taxation on positive earnings
+      // Add auto-welfare and subtract event penalty
+      capitalChange += autoWelfare + capitalPenalty;
+
+      // Calculate taxation based on Room policy
       let taxPaid = 0;
       if (capitalChange > 0) {
         let taxRate = 0.0;
-        if (player.role === EconomicRole.WORKER) {
-          taxRate = capitalChange > 15 ? 0.02 : 0.0;
-        } else if (player.role === EconomicRole.COOP || player.role === EconomicRole.HOUSEHOLD) {
-          taxRate = 0.05;
-        } else { // FDI, SOE, POE
-          taxRate = capitalChange > 20 ? 0.20 : 0.10; // Progressive taxation
+        if (room.currentTaxPolicy === 'PROGRESSIVE') {
+          if (player.role === EconomicRole.WORKER) {
+            taxRate = capitalChange > 15 ? 0.02 : 0.0;
+          } else if (player.role === EconomicRole.COOP || player.role === EconomicRole.HOUSEHOLD) {
+            taxRate = 0.08;
+          } else {
+            taxRate = 0.25;
+          }
+        } else if (room.currentTaxPolicy === 'STIMULUS') {
+          if (player.role === EconomicRole.WORKER) {
+            taxRate = 0.0;
+          } else if (player.role === EconomicRole.COOP || player.role === EconomicRole.HOUSEHOLD) {
+            taxRate = 0.02;
+          } else {
+            taxRate = 0.10;
+          }
+        } else {
+          // Default fallback progressive
+          if (player.role === EconomicRole.WORKER) {
+            taxRate = capitalChange > 15 ? 0.02 : 0.0;
+          } else if (player.role === EconomicRole.COOP || player.role === EconomicRole.HOUSEHOLD) {
+            taxRate = 0.05;
+          } else {
+            taxRate = capitalChange > 20 ? 0.20 : 0.10;
+          }
         }
 
         taxPaid = parseFloat((capitalChange * taxRate).toFixed(2));
         capitalChange -= taxPaid;
         macroBudget += taxPaid;
         socialScoreChange += 2.0; // Tax contribution point
+      }
+
+      // FDI BOOM / other event effects on multiplier
+      if (activeEvent === 'FDI_BOOM' && player.role === EconomicRole.WORKER) {
+        multiplierChange += 0.1;
       }
 
       results[player.id] = {
@@ -442,6 +553,28 @@ export class GameService {
       }
     }
 
+    // --- Partnership Pooling & Sharing Pass ---
+    const partnerships = await this.prisma.partnership.findMany({
+      where: {
+        roomId: formattedRoomId,
+        round,
+        status: 'ACCEPTED',
+      },
+    });
+
+    for (const p of partnerships) {
+      const resA = results[p.playerAId];
+      const resB = results[p.playerBId];
+      if (resA && resB) {
+        const totalCapitalChange = resA.capitalChange + resB.capitalChange;
+        resA.capitalChange = parseFloat((totalCapitalChange * p.ratioA).toFixed(2));
+        resB.capitalChange = parseFloat((totalCapitalChange * p.ratioB).toFixed(2));
+        
+        resA.capitalAfter = parseFloat((resA.capitalBefore + resA.capitalChange).toFixed(2));
+        resB.capitalAfter = parseFloat((resB.capitalBefore + resB.capitalChange).toFixed(2));
+      }
+    }
+
     // Second pass: Welfare assistance for players with capital < 50
     for (const player of room.players) {
       if (!player.role) continue;
@@ -456,21 +589,39 @@ export class GameService {
       }
     }
 
-    // Third pass: Public Investment if macroBudget reaches 500+
-    if (macroBudget >= 500.0) {
-      macroBudget -= 300.0;
-      macroEventTriggered = 'Xây dựng cơ sở hạ tầng giao thông (Tăng 10% năng suất sản xuất cho toàn dân)';
+    // Third pass: Public Investment based on policy thresholds
+    let threshold = 500.0;
+    let deduction = 300.0;
+    let socialBonus = 5.0;
+    let multBonus = 0.1;
+
+    if (room.currentTaxPolicy === 'PROGRESSIVE') {
+      threshold = 300.0;
+      deduction = 200.0;
+      socialBonus = 5.0;
+      multBonus = 0.1;
+    } else if (room.currentTaxPolicy === 'STIMULUS') {
+      threshold = 700.0;
+      deduction = 400.0;
+      socialBonus = 7.0;
+      multBonus = 0.15;
+    }
+
+    if (macroBudget >= threshold) {
+      macroBudget -= deduction;
+      const displayEvent = `Xây dựng cơ sở hạ tầng quốc gia (Ngân sách -${deduction}. Mỗi người dân nhận +${socialBonus} Điểm Xã Hội và +${multBonus} Hệ số sản xuất)`;
+      macroEventTriggered = macroEventTriggered ? `${macroEventTriggered} | ${displayEvent}` : displayEvent;
       
       for (const player of room.players) {
         if (!player.role) continue;
         const res = results[player.id];
         
-        res.socialScoreChange += 5.0;
+        res.socialScoreChange += socialBonus;
 
         await this.prisma.player.update({
           where: { id: player.id },
           data: {
-            capitalMultiplier: { increment: 0.1 },
+            capitalMultiplier: { increment: multBonus },
           },
         });
       }
@@ -494,6 +645,23 @@ export class GameService {
       res.capitalAfter = updatedPlayer.capital;
     }
 
+    // Save Market Price History
+    await this.prisma.marketHistory.create({
+      data: {
+        round,
+        price: newMarketPrice,
+        usd: newMarketPrice * 250.0,
+        oil: newMarketPrice * 0.8,
+        gold: newMarketPrice * 0.85,
+        roomId: formattedRoomId,
+      },
+    });
+
+    const marketHistories = await this.prisma.marketHistory.findMany({
+      where: { roomId: formattedRoomId },
+      orderBy: { round: 'asc' },
+    });
+
     // Advance room round counter
     const nextRound = round + 1;
     const isFinished = nextRound > room.maxRounds;
@@ -504,6 +672,8 @@ export class GameService {
         currentRound: nextRound,
         status: isFinished ? RoomStatus.FINISHED : RoomStatus.PLAYING,
         macroBudget,
+        marketPrice: newMarketPrice,
+        activeEvent,
         // Persist warActive if WAR has been played this game
         warActive: room.warActive,
       },
@@ -518,15 +688,12 @@ export class GameService {
       await this.calculateEndGameScores(formattedRoomId);
     }
 
-    // -----------------------------------------------------------------------
-    // Card drawing phase: each eligible player has a 35% chance to draw a card
-    // (skip final round — no need to draw cards you cannot use)
-    // -----------------------------------------------------------------------
+    // Card drawing phase (skip final round)
     const epicDraws: PowerupNotification[] = [];
     if (!isFinished) {
       const drawablePlayers = finalPlayers.filter(p => p.role !== null);
       for (const p of drawablePlayers) {
-        if (Math.random() > 0.35) continue; // no draw this round
+        if (Math.random() > 0.35) continue;
         const drawn = this.rollPowerup();
         const isEpic = drawn === PowerupType.WAR || drawn === PowerupType.TERRORIST;
         const pPowerups = p.powerups || [];
@@ -545,7 +712,6 @@ export class GameService {
             });
           }
         } else {
-          // Inventory full — park it as pending, let the player decide
           await this.prisma.player.update({
             where: { id: p.id },
             data: { pendingPowerup: drawn },
@@ -575,6 +741,7 @@ export class GameService {
       macroBudget,
       macroEventTriggered,
       epicDraws,
+      marketHistories,
     };
   }
 
@@ -883,6 +1050,129 @@ export class GameService {
     return this.prisma.player.update({
       where: { id: playerId },
       data: { pendingPowerup: powerupCode },
+    });
+  }
+
+  async submitPolicyVote(
+    playerId: string,
+    roomId: string,
+    round: number,
+    choice: string,
+  ): Promise<PolicyVote> {
+    const formattedRoomId = roomId.toUpperCase();
+    return this.prisma.policyVote.upsert({
+      where: {
+        playerId_round: {
+          playerId,
+          round,
+        },
+      },
+      update: {
+        choice,
+      },
+      create: {
+        playerId,
+        roomId: formattedRoomId,
+        round,
+        choice,
+      },
+    });
+  }
+
+  async invitePartnership(
+    playerAId: string,
+    playerBId: string,
+    roomId: string,
+    round: number,
+    ratioA: number,
+    ratioB: number,
+  ): Promise<Partnership> {
+    const formattedRoomId = roomId.toUpperCase();
+    
+    // Check if player B is already in a partnership for this round
+    const existing = await this.prisma.partnership.findFirst({
+      where: {
+        roomId: formattedRoomId,
+        round,
+        status: 'ACCEPTED',
+        OR: [
+          { playerAId: playerBId },
+          { playerBId },
+          { playerAId: playerAId },
+          { playerBId: playerAId },
+        ],
+      },
+    });
+    if (existing) {
+      throw new BadRequestException('Một trong hai người chơi đã tham gia liên doanh ở vòng này');
+    }
+
+    return this.prisma.partnership.create({
+      data: {
+        playerAId,
+        playerBId,
+        roomId: formattedRoomId,
+        round,
+        ratioA,
+        ratioB,
+        status: 'PENDING',
+      },
+      include: {
+        playerA: true,
+        playerB: true,
+      },
+    });
+  }
+
+  async respondPartnership(
+    partnershipId: string,
+    status: 'ACCEPTED' | 'REJECTED',
+  ): Promise<Partnership> {
+    const partnership = await this.prisma.partnership.findUnique({
+      where: { id: partnershipId },
+    });
+    if (!partnership) throw new NotFoundException('Lời mời liên doanh không tồn tại');
+
+    if (status === 'ACCEPTED') {
+      // Check again if either player is already in an accepted partnership
+      const existing = await this.prisma.partnership.findFirst({
+        where: {
+          roomId: partnership.roomId,
+          round: partnership.round,
+          status: 'ACCEPTED',
+          OR: [
+            { playerAId: partnership.playerAId },
+            { playerBId: partnership.playerAId },
+            { playerAId: partnership.playerBId },
+            { playerBId: partnership.playerBId },
+          ],
+        },
+      });
+      if (existing) {
+        throw new BadRequestException('Một trong hai người chơi đã có liên doanh khác được chấp nhận');
+      }
+    }
+
+    return this.prisma.partnership.update({
+      where: { id: partnershipId },
+      data: { status },
+      include: {
+        playerA: true,
+        playerB: true,
+      },
+    });
+  }
+
+  async getRoundVotes(roomId: string, round: number): Promise<PolicyVote[]> {
+    return this.prisma.policyVote.findMany({
+      where: { roomId: roomId.toUpperCase(), round },
+    });
+  }
+
+  async updateRoomTaxPolicy(roomId: string, policy: string): Promise<Room> {
+    return this.prisma.room.update({
+      where: { id: roomId.toUpperCase() },
+      data: { currentTaxPolicy: policy },
     });
   }
 }

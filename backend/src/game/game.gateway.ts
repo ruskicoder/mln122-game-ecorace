@@ -310,21 +310,87 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       macroBudget: result.macroBudget,
       macroEventTriggered: result.macroEventTriggered,
       epicDraws: result.epicDraws,
+      marketHistories: result.marketHistories,
+    });
+
+    // Broadcast market price update for live chart
+    this.server.to(roomId).emit('market_price_updated', {
+      marketHistories: result.marketHistories,
     });
 
     const room = await this.gameService.getRoom(roomId);
     if (room && room.status === 'PLAYING') {
-      // Broadcast new round start
-      this.server.to(roomId).emit('round_started', {
-        round: room.currentRound,
-        duration: room.roundDuration,
-        macroBudget: room.macroBudget,
-      });
+      // Check if we just completed a multiple of 5 rounds (e.g. round 5, 10...)
+      if (round % 5 === 0) {
+        this.server.to(roomId).emit('voting_started', {
+          round: room.currentRound,
+          duration: 20,
+        });
+
+        setTimeout(async () => {
+          await this.tallyVotesAndStartNextRound(roomId, room.currentRound);
+        }, 20000);
+      } else {
+        // Broadcast new round start immediately
+        this.server.to(roomId).emit('round_started', {
+          round: room.currentRound,
+          duration: room.roundDuration,
+          macroBudget: room.macroBudget,
+        });
+      }
     } else if (room && room.status === 'FINISHED') {
       const leaderboard = await this.gameService.getRoomLeaderboard(roomId);
       this.server.to(roomId).emit('game_ended', {
         leaderboard,
       });
+    }
+  }
+
+  private async tallyVotesAndStartNextRound(roomId: string, round: number) {
+    try {
+      const room = await this.gameService.getRoom(roomId);
+      if (!room || room.status !== 'PLAYING') return;
+
+      const votes = await this.gameService.getRoundVotes(roomId, round);
+      let progressiveCount = 0;
+      let stimulusCount = 0;
+      for (const v of votes) {
+        if (v.choice === 'PROGRESSIVE') progressiveCount++;
+        else if (v.choice === 'STIMULUS') stimulusCount++;
+      }
+
+      let winner = room.currentTaxPolicy || 'PROGRESSIVE';
+      if (progressiveCount > stimulusCount) {
+        winner = 'PROGRESSIVE';
+      } else if (stimulusCount > progressiveCount) {
+        winner = 'STIMULUS';
+      }
+
+      const updatedRoom = await this.gameService.updateRoomTaxPolicy(roomId, winner);
+      const players = await this.gameService.getRoomPlayers(roomId);
+
+      this.server.to(roomId).emit('voting_ended', {
+        winner,
+        progressiveCount,
+        stimulusCount,
+        room: { ...updatedRoom, players },
+      });
+
+      // Broadcast room_updated to refresh policy display
+      this.server.to(roomId).emit('room_updated', {
+        roomId,
+        players,
+        room: updatedRoom,
+      });
+
+      // Start the next round
+      this.server.to(roomId).emit('round_started', {
+        round: updatedRoom.currentRound,
+        duration: updatedRoom.roundDuration,
+        macroBudget: updatedRoom.macroBudget,
+      });
+    } catch (err) {
+      console.error('[gateway] error tallying votes:', err);
     }
   }
 
@@ -438,6 +504,123 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return { success: true, data: { room: room ? { ...room, players } : null } };
     } catch (err: any) {
       return { success: false, error: err.message || 'Không thể lấy thông tin phòng' };
+    }
+  }
+
+  @SubscribeMessage('submit_policy_vote')
+  async handleSubmitPolicyVote(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { roomId: string; choice: string },
+  ): Promise<SocketResponse> {
+    const { roomId, choice } = data;
+    const formattedRoomId = roomId.toUpperCase();
+
+    try {
+      const player = await this.prismaFindPlayerBySocket(client.id);
+      if (!player) {
+        return { success: false, error: 'Không tìm thấy người chơi' };
+      }
+
+      const room = await this.gameService.getRoom(formattedRoomId);
+      if (!room || room.status !== 'PLAYING') {
+        return { success: false, error: 'Game chưa bắt đầu hoặc đã kết thúc' };
+      }
+
+      const vote = await this.gameService.submitPolicyVote(
+        player.id,
+        formattedRoomId,
+        room.currentRound,
+        choice,
+      );
+
+      const votes = await this.gameService.getRoundVotes(formattedRoomId, room.currentRound);
+      this.server.to(formattedRoomId).emit('votes_updated', {
+        round: room.currentRound,
+        votes,
+      });
+
+      return { success: true, data: vote };
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Lỗi khi bỏ phiếu chính sách' };
+    }
+  }
+
+  @SubscribeMessage('propose_partnership')
+  async handleProposePartnership(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { roomId: string; targetPlayerId: string; ratioA: number; ratioB: number },
+  ): Promise<SocketResponse> {
+    const { roomId, targetPlayerId, ratioA, ratioB } = data;
+    const formattedRoomId = roomId.toUpperCase();
+
+    try {
+      const player = await this.prismaFindPlayerBySocket(client.id);
+      if (!player) {
+        return { success: false, error: 'Không tìm thấy người chơi' };
+      }
+
+      const room = await this.gameService.getRoom(formattedRoomId);
+      if (!room || room.status !== 'PLAYING') {
+        return { success: false, error: 'Game chưa bắt đầu hoặc đã kết thúc' };
+      }
+
+      const partnership = await this.gameService.invitePartnership(
+        player.id,
+        targetPlayerId,
+        formattedRoomId,
+        room.currentRound,
+        ratioA,
+        ratioB,
+      );
+
+      const targetPlayer = (await this.gameService.getRoomPlayers(formattedRoomId)).find(p => p.id === targetPlayerId);
+      if (targetPlayer && targetPlayer.socketId) {
+        this.server.to(targetPlayer.socketId).emit('partnership_proposed', {
+          partnership,
+        });
+      }
+
+      return { success: true, data: partnership };
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Lỗi khi gửi lời mời liên doanh' };
+    }
+  }
+
+  @SubscribeMessage('respond_partnership')
+  async handleRespondPartnership(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { roomId: string; partnershipId: string; status: 'ACCEPTED' | 'REJECTED' },
+  ): Promise<SocketResponse> {
+    const { roomId, partnershipId, status } = data;
+    const formattedRoomId = roomId.toUpperCase();
+
+    try {
+      const player = await this.prismaFindPlayerBySocket(client.id);
+      if (!player) {
+        return { success: false, error: 'Không tìm thấy người chơi' };
+      }
+
+      const partnership = await this.gameService.respondPartnership(partnershipId, status);
+
+      const initiator = (await this.gameService.getRoomPlayers(formattedRoomId)).find(p => p.id === partnership.playerAId);
+      if (initiator && initiator.socketId) {
+        this.server.to(initiator.socketId).emit('partnership_responded', {
+          partnership,
+          status,
+        });
+      }
+
+      const room = await this.gameService.getRoom(formattedRoomId);
+      const players = await this.gameService.getRoomPlayers(formattedRoomId);
+      this.server.to(formattedRoomId).emit('room_updated', {
+        roomId: formattedRoomId,
+        players,
+        room,
+      });
+
+      return { success: true, data: partnership };
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Lỗi khi phản hồi liên doanh' };
     }
   }
 

@@ -5,6 +5,11 @@ import {
   Shield, Sparkles, TrendingUp, Heart, Share2, Award, Info, Users,
   Clock, Landmark, BookOpen, X, ShieldAlert, Eye, ChevronRight, AlertTriangle, Zap
 } from 'lucide-react';
+import { MarketChart } from './MarketChart';
+import { EventPopup } from './EventPopup';
+import { PartnershipPanel } from './PartnershipPanel';
+import { VotingOverlay } from './VotingOverlay';
+import { LessonDrawer } from './LessonDrawer';
 
 export const GameBoardView: React.FC = () => {
   const {
@@ -21,6 +26,7 @@ export const GameBoardView: React.FC = () => {
 
   // Modals & Panels
   const [showHelp, setShowHelp] = useState(false);
+  const [helpTab, setHelpTab] = useState<'rules' | 'lessons'>('rules');
   const [showEndConfirm, setShowEndConfirm] = useState(false);
 
   // Admin adjust state
@@ -328,6 +334,11 @@ export const GameBoardView: React.FC = () => {
                 <div className="text-xs text-gray-400 font-semibold mt-1">Sở hữu: {roleInfo.ownership}</div>
                 <p className="text-xs text-gray-300 mt-4 leading-relaxed">{roleInfo.desc}</p>
               </div>
+
+              {/* Partnership Panel */}
+              {!isOrchestrator && player?.role && (
+                <PartnershipPanel />
+              )}
 
               {/* Private Powerups Inventory Block */}
               {player && player.role && (
@@ -738,161 +749,224 @@ export const GameBoardView: React.FC = () => {
               </button>
             </div>
 
+            {/* Tabs Row */}
+            <div className="flex space-x-2 border-b border-white/5 pb-2 shrink-0">
+              <button
+                onClick={() => setHelpTab('rules')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition border ${
+                  helpTab === 'rules'
+                    ? 'bg-blue-600/20 text-blue-400 border-blue-500/30'
+                    : 'border-transparent text-gray-400 hover:text-white'
+                }`}
+              >
+                Luật & Công Thức
+              </button>
+              <button
+                onClick={() => setHelpTab('lessons')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition border ${
+                  helpTab === 'lessons'
+                    ? 'bg-blue-600/20 text-blue-400 border-blue-500/30'
+                    : 'border-transparent text-gray-400 hover:text-white'
+                }`}
+              >
+                Lớp học vĩ mô 🎓
+              </button>
+            </div>
+
             <div className="flex-1 overflow-y-auto space-y-4 pr-1 text-xs text-gray-300 scrollbar-thin">
-              <div className="bg-white/5 p-3 rounded-xl border border-white/5 leading-relaxed">
-                <strong className="text-yellow-400 block mb-1">Cách tính điểm chiến thắng:</strong>
-                <div className="font-mono text-[10px] text-gray-300 bg-black/45 p-2 rounded mt-2 text-center border border-white/5">
-                  Final Score = (Vốn / 10) + Điểm Lao Động + Điểm Đóng Góp Xã Hội + Điểm Phúc Lợi + Điểm Thưởng Bền Vững
-                </div>
-              </div>
+              {helpTab === 'rules' ? (
+                <>
+                  <div className="bg-white/5 p-3 rounded-xl border border-white/5 leading-relaxed">
+                    <strong className="text-yellow-400 block mb-1">Cách tính điểm chiến thắng:</strong>
+                    <div className="font-mono text-[10px] text-gray-300 bg-black/45 p-2 rounded mt-2 text-center border border-white/5">
+                      Final Score = (Vốn / 10) + Điểm Lao Động + Điểm Đóng Góp Xã Hội + Điểm Phúc Lợi + Điểm Thưởng Bền Vững
+                    </div>
+                  </div>
 
-              <div className="space-y-2">
-                <span className="font-bold text-gray-300 block">Các thành phần kinh tế (6 Vai trò):</span>
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-[10px]">
-                  <div className="bg-purple-500/5 p-2 rounded border border-purple-500/10"><strong className="text-purple-400">FDI (120.0 vốn):</strong> Doanh nghiệp ngoại, vốn lớn.</div>
-                  <div className="bg-red-500/5 p-2 rounded border border-red-500/10"><strong className="text-red-400">SOE (100.0 vốn):</strong> Quốc doanh, vai trò chủ đạo.</div>
-                  <div className="bg-blue-500/5 p-2 rounded border border-blue-500/10"><strong className="text-blue-400">POE (90.0 vốn):</strong> Doanh nghiệp tư nhân trong nước.</div>
-                  <div className="bg-green-500/5 p-2 rounded border border-green-500/10"><strong className="text-green-400">COOP (80.0 vốn):</strong> Hợp tác xã, sở hữu tập thể.</div>
-                  <div className="bg-yellow-500/5 p-2 rounded border border-yellow-500/10"><strong className="text-yellow-400">Hộ cá thể (70.0):</strong> Kinh tế gia đình tự chủ.</div>
-                  <div className="bg-orange-500/5 p-2 rounded border border-orange-500/10"><strong className="text-orange-400">Lao động (50.0):</strong> Nhận lương, không có tư liệu.</div>
-                </div>
-              </div>
+                  <div className="space-y-2">
+                    <span className="font-bold text-gray-300 block">Các thành phần kinh tế (6 Vai trò):</span>
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-[10px]">
+                      <div className="bg-purple-500/5 p-2 rounded border border-purple-500/10"><strong className="text-purple-400">FDI (120.0 vốn):</strong> Doanh nghiệp ngoại, vốn lớn.</div>
+                      <div className="bg-red-500/5 p-2 rounded border border-red-500/10"><strong className="text-red-400">SOE (100.0 vốn):</strong> Quốc doanh, vai trò chủ đạo.</div>
+                      <div className="bg-blue-500/5 p-2 rounded border border-blue-500/10"><strong className="text-blue-400">POE (90.0 vốn):</strong> Doanh nghiệp tư nhân trong nước.</div>
+                      <div className="bg-green-500/5 p-2 rounded border border-green-500/10"><strong className="text-green-400">COOP (80.0 vốn):</strong> Hợp tác xã, sở hữu tập thể.</div>
+                      <div className="bg-yellow-500/5 p-2 rounded border border-yellow-500/10"><strong className="text-yellow-400">Hộ cá thể (70.0):</strong> Kinh tế gia đình tự chủ.</div>
+                      <div className="bg-orange-500/5 p-2 rounded border border-orange-500/10"><strong className="text-orange-400">Lao động (50.0):</strong> Nhận lương, không có tư liệu.</div>
+                    </div>
+                  </div>
 
-              <div className="space-y-2">
-                <span className="font-bold text-gray-300 block">Công thức các hành động:</span>
-                <div className="space-y-2 text-[11px] text-gray-400">
-                  <div className="bg-black/20 p-2.5 rounded border border-white/5">
-                    <strong className="text-white">PRODUCE (Sản xuất):</strong><br />
-                    • Lao động: <span className="text-green-400">+15.0 Vốn</span> (lương), <span className="text-green-400">+2.0 Điểm Lao động</span>.<br />
-                    • Khác: <span className="text-green-400">+(20.0 x Hiệu suất) Vốn</span>. Phải đóng thuế tương ứng.
+                  <div className="space-y-2">
+                    <span className="font-bold text-gray-300 block">Công thức các hành động:</span>
+                    <div className="space-y-2 text-[11px] text-gray-400">
+                      <div className="bg-black/20 p-2.5 rounded border border-white/5">
+                        <strong className="text-white">PRODUCE (Sản xuất):</strong><br />
+                        • Lao động: <span className="text-green-400">+15.0 Vốn</span> (lương), <span className="text-green-400">+2.0 Điểm Lao động</span>.<br />
+                        • Khác: <span className="text-green-400">+(20.0 x Hiệu suất) Vốn</span>. Phải đóng thuế tương ứng.
+                      </div>
+                      <div className="bg-black/20 p-2.5 rounded border border-white/5">
+                        <strong className="text-white">INVEST (Đầu tư):</strong><br />
+                        • Lao động: Tốn <span className="text-red-400">-15.0 Vốn</span>, tăng vĩnh viễn <span className="text-green-400">+20% Hiệu suất</span>.<br />
+                        • Khác: Tốn <span className="text-red-400">-30.0 Vốn</span> (hoặc <span className="text-red-400">-40.0</span> nếu đang chiến tranh), tăng vĩnh viễn <span className="text-green-400">+30% Hiệu suất</span>.
+                      </div>
+                      <div className="bg-black/20 p-2.5 rounded border border-white/5">
+                        <strong className="text-white">WELFARE (Phúc lợi):</strong><br />
+                        • Lao động: Nhận trợ cấp <span className="text-green-400">+15.0 Vốn</span>, <span className="text-green-400">+1.0 Điểm Phúc lợi</span>.<br />
+                        • Khác: Tốn vốn (<span className="text-red-400">-10.0</span> tới <span className="text-red-400">-20.0</span>), tăng <span className="text-green-400">+2.0 / +3.0 Điểm Xã hội</span>.
+                      </div>
+                      <div className="bg-black/20 p-2.5 rounded border border-white/5">
+                        <strong className="text-white">OPTIMIZE (Tối ưu chi phí):</strong><br />
+                        • Lao động: Tăng ca nhận <span className="text-green-400">+5.0 Vốn</span>, bị trừ <span className="text-red-400">-1.0 Điểm Xã hội</span>.<br />
+                        • Khác: Tăng mạnh vốn (<span className="text-green-400">COOP +20.0</span>, <span className="text-green-400">DN +35.0</span>) nhưng bị phạt <span className="text-red-400">-1.0 / -2.0 Điểm Xã hội</span>.
+                      </div>
+                      <div className="bg-black/20 p-2.5 rounded border border-white/5">
+                        <strong className="text-white">SOCIAL (Từ thiện):</strong><br />
+                        • Tốn vốn nhỏ (<span className="text-red-400">-4.0</span> tới <span className="text-red-400">-15.0</span>), tăng mạnh <span className="text-green-400">+2.0 / +3.0 Điểm Đóng góp Xã hội</span>.
+                      </div>
+                    </div>
                   </div>
-                  <div className="bg-black/20 p-2.5 rounded border border-white/5">
-                    <strong className="text-white">INVEST (Đầu tư):</strong><br />
-                    • Lao động: Tốn <span className="text-red-400">-15.0 Vốn</span>, tăng vĩnh viễn <span className="text-green-400">+20% Hiệu suất</span>.<br />
-                    • Khác: Tốn <span className="text-red-400">-30.0 Vốn</span> (hoặc <span className="text-red-400">-40.0</span> nếu đang chiến tranh), tăng vĩnh viễn <span className="text-green-400">+30% Hiệu suất</span>.
-                  </div>
-                  <div className="bg-black/20 p-2.5 rounded border border-white/5">
-                    <strong className="text-white">WELFARE (Phúc lợi):</strong><br />
-                    • Lao động: Nhận trợ cấp <span className="text-green-400">+15.0 Vốn</span>, <span className="text-green-400">+1.0 Điểm Phúc lợi</span>.<br />
-                    • Khác: Tốn vốn (<span className="text-red-400">-10.0</span> tới <span className="text-red-400">-20.0</span>), tăng <span className="text-green-400">+2.0 / +3.0 Điểm Xã hội</span>.
-                  </div>
-                  <div className="bg-black/20 p-2.5 rounded border border-white/5">
-                    <strong className="text-white">OPTIMIZE (Tối ưu chi phí):</strong><br />
-                    • Lao động: Tăng ca nhận <span className="text-green-400">+5.0 Vốn</span>, bị trừ <span className="text-red-400">-1.0 Điểm Xã hội</span>.<br />
-                    • Khác: Tăng mạnh vốn (<span className="text-green-400">COOP +20.0</span>, <span className="text-green-400">DN +35.0</span>) nhưng bị phạt <span className="text-red-400">-1.0 / -2.0 Điểm Xã hội</span>.
-                  </div>
-                  <div className="bg-black/20 p-2.5 rounded border border-white/5">
-                    <strong className="text-white">SOCIAL (Từ thiện):</strong><br />
-                    • Tốn vốn nhỏ (<span className="text-red-400">-4.0</span> tới <span className="text-red-400">-15.0</span>), tăng mạnh <span className="text-green-400">+2.0 / +3.0 Điểm Đóng góp Xã hội</span>.
-                  </div>
-                </div>
-              </div>
 
-              <div className="space-y-3">
-                <span className="font-bold text-gray-300 block flex items-center">
-                  <Zap className="w-4 h-4 mr-1 text-purple-400" />
-                  Hệ Thống Thẻ Bài Quyền Lực (Powerups):
-                </span>
-                
-                <div className="bg-[#161a29]/95 border border-purple-500/20 p-3.5 rounded-xl space-y-3">
-                  <p className="text-[11px] text-gray-400 leading-relaxed">
-                    • <strong>Quy tắc rút thẻ:</strong> Cuối mỗi vòng đấu, mỗi người chơi có <strong>35% cơ hội</strong> rút ngẫu nhiên 1 thẻ bài kinh tế (không áp dụng ở vòng cuối).<br />
-                    • <strong>Giới hạn kho bài:</strong> Kho tối đa chứa <strong>3 thẻ</strong>. Nếu nhận thẻ thứ 4, giao diện <strong>Trao Đổi/Hủy (Swap/Discard)</strong> sẽ xuất hiện để bạn chọn thay thế thẻ cũ hoặc bỏ thẻ mới.<br />
-                    • <strong>Điều kiện kích hoạt:</strong> Một số thẻ có thể kích hoạt trực tiếp lên bản thân (Self), một số thẻ yêu cầu chọn mục tiêu cụ thể trên <strong>Bảng Xếp Hạng Trực Tiếp</strong> (Targeted).
-                  </p>
+                  <div className="space-y-3">
+                    <span className="font-bold text-gray-300 block flex items-center">
+                      <Zap className="w-4 h-4 mr-1 text-purple-400" />
+                      Hệ Thống Thẻ Bài Quyền Lực (Powerups):
+                    </span>
+                    
+                    <div className="bg-[#161a29]/95 border border-purple-500/20 p-3.5 rounded-xl space-y-3">
+                      <p className="text-[11px] text-gray-400 leading-relaxed">
+                        • <strong>Quy tắc rút thẻ:</strong> Cuối mỗi vòng đấu, mỗi người chơi có <strong>35% cơ hội</strong> rút ngẫu nhiên 1 thẻ bài kinh tế (không áp dụng ở vòng cuối).<br />
+                        • <strong>Giới hạn kho bài:</strong> Kho tối đa chứa <strong>3 thẻ</strong>. Nếu nhận thẻ thứ 4, giao diện <strong>Trao Đổi/Hủy (Swap/Discard)</strong> sẽ xuất hiện để bạn chọn thay thế thẻ cũ hoặc bỏ thẻ mới.<br />
+                        • <strong>Điều kiện kích hoạt:</strong> Một số thẻ có thể kích hoạt trực tiếp lên bản thân (Self), một số thẻ yêu cầu chọn mục tiêu cụ thể trên <strong>Bảng Xếp Hạng Trực Tiếp</strong> (Targeted).
+                      </p>
 
-                  <div className="border-t border-white/5 pt-2.5 space-y-2">
-                    <strong className="text-yellow-400 block text-[11px] uppercase tracking-wider">Cơ chế phòng thủ Bị Động (Lá Chắn - SHIELD):</strong>
-                    <p className="text-[11px] text-gray-400 leading-relaxed">
-                      • <strong>Lá Chắn (SHIELD)</strong> là thẻ bài <strong>bị động (passive)</strong>, không thể chủ động nhấn sử dụng.<br />
-                      • Khi bạn bị nhắm mục tiêu bởi một thẻ hại (<span className="text-red-400">Thuế Mỹ</span>, <span className="text-red-400">FDI Rút Vốn</span>, hoặc <span className="text-red-400">Sự Cố An Ninh</span>), hệ thống sẽ <strong>tự động tiêu thụ 1 thẻ Lá Chắn</strong> trong kho của bạn.<br />
-                      • Khi kích hoạt, Lá Chắn sẽ <strong>giảm 50% toàn bộ thiệt hại/phạt vốn hoặc hiệu suất</strong> do thẻ đó gây ra.
+                      <div className="border-t border-white/5 pt-2.5 space-y-2">
+                        <strong className="text-yellow-400 block text-[11px] uppercase tracking-wider">Cơ chế phòng thủ Bị Động (Lá Chắn - SHIELD):</strong>
+                        <p className="text-[11px] text-gray-400 leading-relaxed">
+                          • <strong>Lá Chắn (SHIELD)</strong> là thẻ bài <strong>bị động (passive)</strong>, không thể chủ động nhấn sử dụng.<br />
+                          • Khi bạn bị nhắm mục tiêu bởi một thẻ hại (<span className="text-red-400">Thuế Mỹ</span>, <span className="text-red-400">FDI Rút Vốn</span>, hoặc <span className="text-red-400">Sự Cố An Ninh</span>), hệ thống sẽ <strong>tự động tiêu thụ 1 thẻ Lá Chắn</strong> trong kho của bạn.<br />
+                          • Khi kích hoạt, Lá Chắn sẽ <strong>giảm 50% toàn bộ thiệt hại/phạt vốn hoặc hiệu suất</strong> do thẻ đó gây ra.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2 text-[11px]">
+                      <div className="bg-black/25 p-2.5 rounded border border-white/5 space-y-1">
+                        <div className="flex justify-between items-center">
+                          <strong className="text-white">🚀 Bắt Trend (TREND_CATCH)</strong>
+                          <span className="text-[9px] text-gray-400 px-1.5 py-0.5 rounded bg-white/5 font-mono">Tự kích hoạt | Common (50%)</span>
+                        </div>
+                        <p className="text-gray-400">Tăng vĩnh viễn <span className="text-green-400">+0.5 Hệ số sản xuất</span> cho bản thân.</p>
+                      </div>
+
+                      <div className="bg-black/25 p-2.5 rounded border border-white/5 space-y-1">
+                        <div className="flex justify-between items-center">
+                          <strong className="text-white">📣 Sóng KOLs (INFLUENCER)</strong>
+                          <span className="text-[9px] text-gray-400 px-1.5 py-0.5 rounded bg-white/5 font-mono">Chọn mục tiêu | Common (50%)</span>
+                        </div>
+                        <p className="text-gray-400">Nhắm vào 1 người chơi thuộc nhóm <strong>POE, COOP, hoặc Hộ cá thể</strong>. Cộng ngay <span className="text-green-400">+20.0 Vốn</span> và <span className="text-green-400">+1.0 Điểm Đóng góp Xã hội</span> cho họ.</p>
+                      </div>
+
+                      <div className="bg-black/25 p-2.5 rounded border border-white/5 space-y-1">
+                        <div className="flex justify-between items-center">
+                          <strong className="text-white">🛡️ Vượt Khó (HARDSHIP)</strong>
+                          <span className="text-[9px] text-gray-400 px-1.5 py-0.5 rounded bg-white/5 font-mono">Tự kích hoạt | Common (50%)</span>
+                        </div>
+                        <p className="text-gray-400">Nhận <span className="text-green-400">+2.0 Điểm Phúc lợi</span>. Nếu Vốn hiện tại dưới 50.0, bảo hiểm tự động khôi phục sàn vốn của bạn về đúng <span className="text-green-400">50.0</span>.</p>
+                      </div>
+
+                      <div className="bg-black/25 p-2.5 rounded border border-white/5 space-y-1">
+                        <div className="flex justify-between items-center">
+                          <strong className="text-white">🛡️ Lá Chắn (SHIELD)</strong>
+                          <span className="text-[9px] text-purple-400 px-1.5 py-0.5 rounded bg-purple-500/10 border border-purple-500/20 font-mono font-bold">Bị động tự động | Rare (25%)</span>
+                        </div>
+                        <p className="text-gray-400">Tự động tiêu thụ khi bị người khác tấn công để cản 50% sát thương nhận vào.</p>
+                      </div>
+
+                      <div className="bg-black/25 p-2.5 rounded border border-white/5 space-y-1">
+                        <div className="flex justify-between items-center">
+                          <strong className="text-white">🇺🇸 Thuế Mỹ (USA_TAX)</strong>
+                          <span className="text-[9px] text-red-400 px-1.5 py-0.5 rounded bg-red-500/10 border border-red-500/20 font-mono font-bold">Chọn mục tiêu | Rare (25%)</span>
+                        </div>
+                        <p className="text-gray-400">Tấn công nhắm vào <strong>FDI hoặc POE</strong>. Trực tiếp cắt giảm <span className="text-red-400">-40% tổng số Vốn hiện có</span> của mục tiêu (chùi mất 20% nếu đối thủ có Lá Chắn).</p>
+                      </div>
+
+                      <div className="bg-black/25 p-2.5 rounded border border-white/5 space-y-1">
+                        <div className="flex justify-between items-center">
+                          <strong className="text-white">📉 FDI Rút Vốn (FDI_FLUX)</strong>
+                          <span className="text-[9px] text-red-400 px-1.5 py-0.5 rounded bg-red-500/10 border border-red-500/20 font-mono font-bold">Chọn mục tiêu | Rare (25%)</span>
+                        </div>
+                        <p className="text-gray-400">Tấn công chỉ nhắm được vào <strong>FDI</strong>. Trừ ngay <span className="text-red-400">-15.0 Vốn</span> và <span className="text-red-400">-0.2 Hệ số sản xuất</span> (giảm một nửa nếu có Lá Chắn).</p>
+                      </div>
+
+                      <div className="bg-black/25 p-2.5 rounded border border-white/5 space-y-1">
+                        <div className="flex justify-between items-center">
+                          <strong className="text-white">🇻🇳 Tự Hào VN (PRIDE)</strong>
+                          <span className="text-[9px] text-gray-400 px-1.5 py-0.5 rounded bg-white/5 font-mono">Tự kích hoạt | Rare (25%)</span>
+                        </div>
+                        <p className="text-gray-400">Cộng ngay <span className="text-green-400">+10.0 Vốn</span> và <span className="text-green-400">+1.0 Điểm Xã hội</span> cho toàn bộ người chơi nội địa (SOE, POE, COOP, Hộ cá thể, Lao động) trong phòng.</p>
+                      </div>
+
+                      <div className="bg-black/25 p-2.5 rounded border border-white/5 space-y-1">
+                        <div className="flex justify-between items-center">
+                          <strong className="text-white">🌍 Vươn Tầm (GLOBAL)</strong>
+                          <span className="text-[9px] text-gray-400 px-1.5 py-0.5 rounded bg-white/5 font-mono">Tự kích hoạt | Rare (25%)</span>
+                        </div>
+                        <p className="text-gray-400">Không thể dùng bởi Lao Động. Cộng ngay <span className="text-green-400">+0.3 Hệ số sản xuất</span> và <span className="text-green-400">+5.0 Điểm tổng kết vĩnh viễn</span>.</p>
+                      </div>
+
+                      <div className="bg-black/25 p-2.5 rounded border border-white/5 space-y-1">
+                        <div className="flex justify-between items-center">
+                          <strong className="text-white">⚔️ Chiến Tranh (WAR)</strong>
+                          <span className="text-[9px] text-orange-400 px-1.5 py-0.5 rounded bg-orange-500/10 border border-orange-500/20 font-mono font-bold">Toàn phòng | Epic (9%)</span>
+                        </div>
+                        <p className="text-gray-400">Tất cả người chơi bị trừ <span className="text-red-400">-10.0 Vốn</span>. Kích hoạt trạng thái chiến tranh vĩ mô: Tăng giá của lệnh INVEST thêm <span className="text-red-400">+10.0 Vốn</span> cho phần còn lại của trận đấu.</p>
+                      </div>
+
+                      <div className="bg-black/25 p-2.5 rounded border border-white/5 space-y-1">
+                        <div className="flex justify-between items-center">
+                          <strong className="text-white">⚠️ Sự Cố An Ninh (TERRORIST)</strong>
+                          <span className="text-[9px] text-red-500 px-1.5 py-0.5 rounded bg-red-500/20 border border-red-500/30 font-mono font-black animate-pulse">Chọn mục tiêu | Mythic (1%)</span>
+                        </div>
+                        <p className="text-gray-400">Tấn công cực mạnh vào bất kỳ đối thủ nào. Trực tiếp tiêu diệt <span className="text-red-400">-50% tổng số Vốn tích lũy</span> của họ (chỉ mất 25% nếu đối thủ có Lá Chắn).</p>
+                      </div>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className="space-y-5">
+                  <div className="bg-blue-500/5 p-4 rounded-xl border border-blue-500/20 space-y-2">
+                    <h4 className="text-sm font-bold text-blue-400 flex items-center">
+                      <BookOpen className="w-4 h-4 mr-2" />
+                      Chủ Đề 1: Thuế Luỹ Tiến (Progressive Tax) vs Kích Cầu Thuế (Stimulus)
+                    </h4>
+                    <p className="leading-relaxed text-[11px] text-gray-300">
+                      • <strong>Thuế Luỹ Tiến (Progressive Tax):</strong> Thuế suất tăng dần theo mức thu nhập/vốn. Trong trò chơi, khi chính sách này có hiệu lực, người chơi có tích lũy vốn càng lớn (như FDI, SOE) sẽ phải chịu mức thuế suất cao hơn đáng kể khi dùng lệnh <strong>PRODUCE</strong>. Điều này giúp tăng ngân sách Nhà nước nhanh chóng để chi cho đầu công, đồng thời thu hẹp khoảng cách giàu nghèo (bảo vệ các hộ cá thể, lao động nghèo).<br />
+                      • <strong>Kích Cầu Thuế (Stimulus):</strong> Giảm thuế đồng loạt hoặc hoàn thuế để kích thích sản xuất kinh doanh. Khi chính sách này có hiệu lực, thuế suất sản xuất giảm mạnh về mức cố định thấp (10% - 15%), giúp các doanh nghiệp bảo toàn vốn để tái đầu tư mở rộng sản xuất (INVEST). Tuy nhiên, ngân sách quốc gia sẽ tăng trưởng chậm hơn.
+                    </p>
+                  </div>
+
+                  <div className="bg-red-500/5 p-4 rounded-xl border border-red-500/20 space-y-2">
+                    <h4 className="text-sm font-bold text-red-400 flex items-center">
+                      <AlertTriangle className="w-4 h-4 mr-2" />
+                      Chủ Đề 2: Khủng Hoảng Kinh Tế (Crisis) & Thiên Tai (Disaster)
+                    </h4>
+                    <p className="leading-relaxed text-[11px] text-gray-300">
+                      • <strong>Khủng hoảng toàn cầu (Global Crisis):</strong> Là sự suy giảm hoạt động kinh tế trên toàn thế giới, biểu hiện qua lạm phát tăng cao, lãi suất leo thang và thắt chặt tiền tệ. Các doanh nghiệp phụ thuộc dòng vốn quốc tế (FDI) chịu tổn thất nặng nhất (-25% vốn), tiếp đến là doanh nghiệp nội địa.<br />
+                      • <strong>Thiên tai & Dịch bệnh (Disaster):</strong> Tác động bất khả kháng phá hủy trực tiếp các nhà máy, chuỗi cung ứng sản xuất vật lý Gây thiệt hại nặng cho doanh nghiệp nội địa (POE -20% vốn) và nông nghiệp tập thể.<br />
+                      • <strong>Giải pháp chống chịu vĩ mô (Welfare & Social Score):</strong> Những chủ thể tích cực đóng góp vào quỹ phúc lợi xã hội (điểm Phúc lợi + điểm Xã hội ≥ 5.0) sẽ nhận được sự hỗ trợ/đồng lòng từ người dân và Nhà nước, qua đó <strong>được giảm 50% toàn bộ thiệt hại vốn</strong> khi các biến cố này xảy ra.
+                    </p>
+                  </div>
+
+                  <div className="bg-green-500/5 p-4 rounded-xl border border-green-500/20 space-y-2">
+                    <h4 className="text-sm font-bold text-green-400 flex items-center">
+                      <Users className="w-4 h-4 mr-2" />
+                      Chủ Đề 3: Hợp Tác Liên Doanh (Joint Venture) & Hiệu Ứng Quy Mô
+                    </h4>
+                    <p className="leading-relaxed text-[11px] text-gray-300">
+                      • <strong>Liên doanh (Joint Venture):</strong> Hình thức hợp tác giữa các thực thể kinh tế nhằm gộp chung nguồn lực sản xuất, tối ưu hóa công nghệ và chia sẻ rủi ro. Trong trò chơi, hai người chơi liên doanh sẽ được <strong>cộng gộp Hiệu Suất Sản Xuất</strong> của cả hai để tạo ra tổng sản lượng cực lớn khi làm lệnh <strong>PRODUCE</strong>, sau đó phân chia doanh thu theo tỷ lệ đã thỏa thuận trước (50/50, 60/40, 70/30). Đây là chìa khóa để các doanh nghiệp nhỏ bứt phá hiệu suất sản xuất.
                     </p>
                   </div>
                 </div>
-
-                <div className="space-y-2 text-[11px]">
-                  <div className="bg-black/25 p-2.5 rounded border border-white/5 space-y-1">
-                    <div className="flex justify-between items-center">
-                      <strong className="text-white">🚀 Bắt Trend (TREND_CATCH)</strong>
-                      <span className="text-[9px] text-gray-400 px-1.5 py-0.5 rounded bg-white/5 font-mono">Tự kích hoạt | Common (50%)</span>
-                    </div>
-                    <p className="text-gray-400">Tăng vĩnh viễn <span className="text-green-400">+0.5 Hệ số sản xuất</span> cho bản thân.</p>
-                  </div>
-
-                  <div className="bg-black/25 p-2.5 rounded border border-white/5 space-y-1">
-                    <div className="flex justify-between items-center">
-                      <strong className="text-white">📣 Sóng KOLs (INFLUENCER)</strong>
-                      <span className="text-[9px] text-gray-400 px-1.5 py-0.5 rounded bg-white/5 font-mono">Chọn mục tiêu | Common (50%)</span>
-                    </div>
-                    <p className="text-gray-400">Nhắm vào 1 người chơi thuộc nhóm <strong>POE, COOP, hoặc Hộ cá thể</strong>. Cộng ngay <span className="text-green-400">+20.0 Vốn</span> và <span className="text-green-400">+1.0 Điểm Đóng góp Xã hội</span> cho họ.</p>
-                  </div>
-
-                  <div className="bg-black/25 p-2.5 rounded border border-white/5 space-y-1">
-                    <div className="flex justify-between items-center">
-                      <strong className="text-white">🛡️ Vượt Khó (HARDSHIP)</strong>
-                      <span className="text-[9px] text-gray-400 px-1.5 py-0.5 rounded bg-white/5 font-mono">Tự kích hoạt | Common (50%)</span>
-                    </div>
-                    <p className="text-gray-400">Nhận <span className="text-green-400">+2.0 Điểm Phúc lợi</span>. Nếu Vốn hiện tại dưới 50.0, bảo hiểm tự động khôi phục sàn vốn của bạn về đúng <span className="text-green-400">50.0</span>.</p>
-                  </div>
-
-                  <div className="bg-black/25 p-2.5 rounded border border-white/5 space-y-1">
-                    <div className="flex justify-between items-center">
-                      <strong className="text-white">🛡️ Lá Chắn (SHIELD)</strong>
-                      <span className="text-[9px] text-purple-400 px-1.5 py-0.5 rounded bg-purple-500/10 border border-purple-500/20 font-mono font-bold">Bị động tự động | Rare (25%)</span>
-                    </div>
-                    <p className="text-gray-400">Tự động tiêu thụ khi bị người khác tấn công để cản 50% sát thương nhận vào.</p>
-                  </div>
-
-                  <div className="bg-black/25 p-2.5 rounded border border-white/5 space-y-1">
-                    <div className="flex justify-between items-center">
-                      <strong className="text-white">🇺🇸 Thuế Mỹ (USA_TAX)</strong>
-                      <span className="text-[9px] text-red-400 px-1.5 py-0.5 rounded bg-red-500/10 border border-red-500/20 font-mono font-bold">Chọn mục tiêu | Rare (25%)</span>
-                    </div>
-                    <p className="text-gray-400">Tấn công nhắm vào <strong>FDI hoặc POE</strong>. Trực tiếp cắt giảm <span className="text-red-400">-40% tổng số Vốn hiện có</span> của mục tiêu (chùi mất 20% nếu đối thủ có Lá Chắn).</p>
-                  </div>
-
-                  <div className="bg-black/25 p-2.5 rounded border border-white/5 space-y-1">
-                    <div className="flex justify-between items-center">
-                      <strong className="text-white">📉 FDI Rút Vốn (FDI_FLUX)</strong>
-                      <span className="text-[9px] text-red-400 px-1.5 py-0.5 rounded bg-red-500/10 border border-red-500/20 font-mono font-bold">Chọn mục tiêu | Rare (25%)</span>
-                    </div>
-                    <p className="text-gray-400">Tấn công chỉ nhắm được vào <strong>FDI</strong>. Trừ ngay <span className="text-red-400">-15.0 Vốn</span> và <span className="text-red-400">-0.2 Hệ số sản xuất</span> (giảm một nửa nếu có Lá Chắn).</p>
-                  </div>
-
-                  <div className="bg-black/25 p-2.5 rounded border border-white/5 space-y-1">
-                    <div className="flex justify-between items-center">
-                      <strong className="text-white">🇻🇳 Tự Hào VN (PRIDE)</strong>
-                      <span className="text-[9px] text-gray-400 px-1.5 py-0.5 rounded bg-white/5 font-mono">Tự kích hoạt | Rare (25%)</span>
-                    </div>
-                    <p className="text-gray-400">Cộng ngay <span className="text-green-400">+10.0 Vốn</span> và <span className="text-green-400">+1.0 Điểm Xã hội</span> cho toàn bộ người chơi nội địa (SOE, POE, COOP, Hộ cá thể, Lao động) trong phòng.</p>
-                  </div>
-
-                  <div className="bg-black/25 p-2.5 rounded border border-white/5 space-y-1">
-                    <div className="flex justify-between items-center">
-                      <strong className="text-white">🌍 Vươn Tầm (GLOBAL)</strong>
-                      <span className="text-[9px] text-gray-400 px-1.5 py-0.5 rounded bg-white/5 font-mono">Tự kích hoạt | Rare (25%)</span>
-                    </div>
-                    <p className="text-gray-400">Không thể dùng bởi Lao Động. Cộng ngay <span className="text-green-400">+0.3 Hệ số sản xuất</span> và <span className="text-green-400">+5.0 Điểm tổng kết vĩnh viễn</span>.</p>
-                  </div>
-
-                  <div className="bg-black/25 p-2.5 rounded border border-white/5 space-y-1">
-                    <div className="flex justify-between items-center">
-                      <strong className="text-white">⚔️ Chiến Tranh (WAR)</strong>
-                      <span className="text-[9px] text-orange-400 px-1.5 py-0.5 rounded bg-orange-500/10 border border-orange-500/20 font-mono font-bold">Toàn phòng | Epic (9%)</span>
-                    </div>
-                    <p className="text-gray-400">Tất cả người chơi bị trừ <span className="text-red-400">-10.0 Vốn</span>. Kích hoạt trạng thái chiến tranh vĩ mô: Tăng giá của lệnh INVEST thêm <span className="text-red-400">+10.0 Vốn</span> cho phần còn lại của trận đấu.</p>
-                  </div>
-
-                  <div className="bg-black/25 p-2.5 rounded border border-white/5 space-y-1">
-                    <div className="flex justify-between items-center">
-                      <strong className="text-white">⚠️ Sự Cố An Ninh (TERRORIST)</strong>
-                      <span className="text-[9px] text-red-500 px-1.5 py-0.5 rounded bg-red-500/20 border border-red-500/30 font-mono font-black animate-pulse">Chọn mục tiêu | Mythic (1%)</span>
-                    </div>
-                    <p className="text-gray-400">Tấn công cực mạnh vào bất kỳ đối thủ nào. Trực tiếp tiêu diệt <span className="text-red-400">-50% tổng số Vốn tích lũy</span> của họ (chỉ mất 25% nếu đối thủ có Lá Chắn).</p>
-                  </div>
-                </div>
-              </div>
+              )}
             </div>
 
             <button onClick={() => setShowHelp(false)} className="w-full py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl transition text-xs uppercase">
@@ -1134,6 +1208,18 @@ export const GameBoardView: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Live Market Chart */}
+      <MarketChart />
+
+      {/* Macro Event Popup */}
+      <EventPopup />
+
+      {/* Voting Overlay */}
+      <VotingOverlay />
+
+      {/* Lesson Takeaway Drawer */}
+      <LessonDrawer />
     </div>
   );
 };

@@ -55,6 +55,9 @@ export interface Player {
   roomId: string;
   powerups: string[];          // Current card inventory (max 3)
   pendingPowerup: string | null; // New card waiting for swap/discard decision
+  partnershipsA?: Partnership[];
+  partnershipsB?: Partnership[];
+  votes?: PolicyVote[];
 }
 
 export interface Room {
@@ -66,10 +69,15 @@ export interface Room {
   spectatorMode: boolean;
   warActive: boolean;
   macroBudget: number;
+  marketPrice: number;
+  currentTaxPolicy: string;
+  activeEvent: string | null;
   createdAt: Date | string;
   players?: Player[];
+  marketHistories?: MarketHistory[];
+  partnerships?: Partnership[];
+  policyVotes?: PolicyVote[];
 }
-
 
 export interface RoundAction {
   id: string;
@@ -78,6 +86,38 @@ export interface RoundAction {
   playerId: string;
   roomId: string;
   createdAt: Date | string;
+}
+
+export interface MarketHistory {
+  id: string;
+  round: number;
+  price: number;
+  usd: number;
+  oil: number;
+  gold: number;
+  createdAt: Date | string;
+  roomId: string;
+}
+
+export interface Partnership {
+  id: string;
+  round: number;
+  ratioA: number;
+  ratioB: number;
+  status: string; // PENDING | ACCEPTED | REJECTED | EXPIRED
+  createdAt: Date | string;
+  roomId: string;
+  playerAId: string;
+  playerBId: string;
+}
+
+export interface PolicyVote {
+  id: string;
+  round: number;
+  choice: string; // PROGRESSIVE | STIMULUS
+  createdAt: Date | string;
+  roomId: string;
+  playerId: string;
 }
 
 export interface RoundCalculationResult {

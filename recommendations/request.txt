@@ -1,0 +1,5 @@
+Add stock market live diagram (like Binance) for several amenities like USD, oil, Gold, so that user can act upon events.
+
+Upon event end, a popup will show the previous happened event, and the next event, so that user will know the situation (show around 10s auto)
+
+sau mỗi hành động của người chơi mình sẽ có một cái gì đó hiện lên để mình nói á (takeaway summarize of event and lesson learned (a specific knowledge))

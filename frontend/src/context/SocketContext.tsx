@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
-import type { Player, Room, RoundCalculationResult, SocketResponse } from '@ecorace/shared';
+import type { Player, Room, RoundCalculationResult, SocketResponse, MarketHistory } from '@ecorace/shared';
 import { ActionType, RoomStatus } from '@ecorace/shared';
 
 interface SocketContextType {
@@ -9,6 +9,7 @@ interface SocketContextType {
   player: Player | null;
   room: Room | null;
   results: Record<string, RoundCalculationResult> | null;
+  marketHistories: MarketHistory[] | null;
   leaderboard: Player[] | null;
   error: string | null;
   createRoom: (adminUsername: string) => Promise<void>;
@@ -27,6 +28,14 @@ interface SocketContextType {
   clearNotification: () => void;
   leaveRoom: () => void;
   clearError: () => void;
+  macroEventTriggered: string | null;
+  lastActionTaken: ActionType | null;
+  votingState: { round: number; duration: number } | null;
+  votes: any[] | null;
+  activePartnershipProposal: any | null;
+  submitPolicyVote: (choice: string) => void;
+  proposePartnership: (targetPlayerId: string, ratioA: number, ratioB: number) => void;
+  respondPartnership: (partnershipId: string, status: 'ACCEPTED' | 'REJECTED') => void;
 }
 
 const SocketContext = createContext<SocketContextType | undefined>(undefined);
@@ -37,9 +46,15 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [player, setPlayer] = useState<Player | null>(null);
   const [room, setRoom] = useState<Room | null>(null);
   const [results, setResults] = useState<Record<string, RoundCalculationResult> | null>(null);
+  const [marketHistories, setMarketHistories] = useState<MarketHistory[] | null>(null);
   const [leaderboard, setLeaderboard] = useState<Player[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [lastNotification, setLastNotification] = useState<any | null>(null);
+  const [macroEventTriggered, setMacroEventTriggered] = useState<string | null>(null);
+  const [lastActionTaken, setLastActionTaken] = useState<ActionType | null>(null);
+  const [votingState, setVotingState] = useState<{ round: number; duration: number } | null>(null);
+  const [votes, setVotes] = useState<any[] | null>(null);
+  const [activePartnershipProposal, setActivePartnershipProposal] = useState<any | null>(null);
 
   // socketRef gives synchronous access to the socket instance from callbacks and
   // action handlers without requiring the socket to be in the useEffect deps array.
@@ -120,6 +135,9 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           spectatorMode: data.room?.spectatorMode ?? false,
           warActive: data.room?.warActive ?? false,
           macroBudget: data.room?.macroBudget ?? 0.0,
+          marketPrice: data.room?.marketPrice ?? 100.0,
+          currentTaxPolicy: data.room?.currentTaxPolicy ?? 'STIMULUS',
+          activeEvent: data.room?.activeEvent ?? null,
           createdAt: data.room?.createdAt ?? '',
         };
         // Merge full room snapshot when server sends it (settings updates, join, disconnect)
@@ -144,12 +162,15 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       );
       if (self) setPlayer(self);
       setResults(null);
+      setMarketHistories(null);
+      setMacroEventTriggered(null);
       setLeaderboard(null);
     });
 
     newSocket.on('round_started', (data: { round: number; duration: number; macroBudget: number }) => {
       setRoom((prev) => prev ? { ...prev, currentRound: data.round, roundDuration: data.duration, macroBudget: data.macroBudget } : null);
       setResults(null);
+      setLastActionTaken(null);
     });
 
     newSocket.on('action_submitted', () => {
@@ -163,8 +184,14 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       macroBudget: number;
       macroEventTriggered?: string;
       epicDraws?: any[];
+      marketHistories?: MarketHistory[];
     }) => {
       setResults(data.results);
+      if (data.marketHistories) setMarketHistories(data.marketHistories);
+      if (data.macroEventTriggered) {
+        setMacroEventTriggered(data.macroEventTriggered);
+        setTimeout(() => setMacroEventTriggered(null), 10000);
+      }
       setRoom((prev) => prev ? {
         ...prev,
         players: data.players,
@@ -179,6 +206,10 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       }
     });
 
+    newSocket.on('market_price_updated', (data: { marketHistories: MarketHistory[] }) => {
+      setMarketHistories(data.marketHistories);
+    });
+
     newSocket.on('powerup_activated', (notification: any) => {
       setLastNotification(notification);
     });
@@ -186,6 +217,45 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     newSocket.on('game_ended', (data: { leaderboard: Player[] }) => {
       setLeaderboard(data.leaderboard);
       setRoom((prev) => prev ? { ...prev, status: RoomStatus.FINISHED } : null);
+    });
+
+    newSocket.on('voting_started', (data: { round: number; duration: number }) => {
+      setVotingState(data);
+      setVotes([]);
+    });
+
+    newSocket.on('voting_ended', (data: { winner: string; progressiveCount: number; stimulusCount: number; room: Room }) => {
+      setVotingState(null);
+      setRoom((prev) => prev ? { ...prev, ...data.room } : null);
+      setLastNotification({
+        type: 'voting_result',
+        winner: data.winner,
+        progressiveCount: data.progressiveCount,
+        stimulusCount: data.stimulusCount,
+      });
+    });
+
+    newSocket.on('votes_updated', (data: { round: number; votes: any[] }) => {
+      setVotes(data.votes);
+    });
+
+    newSocket.on('partnership_proposed', (data: { partnership: any }) => {
+      setActivePartnershipProposal(data.partnership);
+    });
+
+    newSocket.on('partnership_responded', (data: { partnership: any; status: 'ACCEPTED' | 'REJECTED' }) => {
+      setActivePartnershipProposal((prev: any) => {
+        if (prev && prev.id === data.partnership.id) {
+          return null;
+        }
+        return prev;
+      });
+
+      setLastNotification({
+        type: 'partnership_response',
+        partnership: data.partnership,
+        status: data.status,
+      });
     });
 
     return () => {
@@ -306,6 +376,7 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     if (s && r && playerIdRef.current) {
       s.emit('submit_action', { roomId: r.id, actionType }, (res: SocketResponse) => {
         if (!res.success) setError(res.error || 'Lỗi khi gửi hành động');
+        else setLastActionTaken(actionType);
       });
     }
   };
@@ -416,6 +487,40 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setLastNotification(null);
   };
 
+  const submitPolicyVote = (choice: string) => {
+    const s = socketRef.current;
+    const r = roomRef.current;
+    if (s && r) {
+      s.emit('submit_policy_vote', { roomId: r.id, choice }, (res: SocketResponse) => {
+        if (!res.success) setError(res.error || 'Lỗi khi bỏ phiếu chính sách');
+      });
+    }
+  };
+
+  const proposePartnership = (targetPlayerId: string, ratioA: number, ratioB: number) => {
+    const s = socketRef.current;
+    const r = roomRef.current;
+    if (s && r) {
+      s.emit('propose_partnership', { roomId: r.id, targetPlayerId, ratioA, ratioB }, (res: SocketResponse) => {
+        if (!res.success) setError(res.error || 'Lỗi khi gửi đề xuất liên doanh');
+      });
+    }
+  };
+
+  const respondPartnership = (partnershipId: string, status: 'ACCEPTED' | 'REJECTED') => {
+    const s = socketRef.current;
+    const r = roomRef.current;
+    if (s && r) {
+      s.emit('respond_partnership', { roomId: r.id, partnershipId, status }, (res: SocketResponse) => {
+        if (!res.success) {
+          setError(res.error || 'Lỗi khi phản hồi liên doanh');
+        } else {
+          setActivePartnershipProposal(null);
+        }
+      });
+    }
+  };
+
   const leaveRoom = () => {
     localStorage.removeItem('playerId');
     localStorage.removeItem('roomId');
@@ -423,8 +528,13 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setPlayer(null);
     setRoom(null);
     setResults(null);
+    setMarketHistories(null);
+    setMacroEventTriggered(null);
     setLeaderboard(null);
     setLastNotification(null);
+    setVotingState(null);
+    setVotes(null);
+    setActivePartnershipProposal(null);
   };
 
   return (
@@ -435,6 +545,7 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         player,
         room,
         results,
+        marketHistories,
         leaderboard,
         error,
         createRoom,
@@ -453,6 +564,14 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         clearNotification,
         leaveRoom,
         clearError,
+        macroEventTriggered,
+        lastActionTaken,
+        votingState,
+        votes,
+        activePartnershipProposal,
+        submitPolicyVote,
+        proposePartnership,
+        respondPartnership,
       }}
     >
       {children}
