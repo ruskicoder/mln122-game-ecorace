@@ -290,6 +290,17 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   }, [socket, room?.id]);
 
   // -----------------------------------------------------------------------
+  // Keep-alive ping to prevent Render free-tier spin-down during gameplay
+  // -----------------------------------------------------------------------
+  useEffect(() => {
+    if (!room?.id || room?.status !== 'PLAYING') return;
+    const keepAliveId = setInterval(() => {
+      fetch('/api').catch(() => {});
+    }, 240000);
+    return () => clearInterval(keepAliveId);
+  }, [room?.id, room?.status]);
+
+  // -----------------------------------------------------------------------
   // Actions — all use socketRef.current so they never need socket in scope
   // -----------------------------------------------------------------------
 

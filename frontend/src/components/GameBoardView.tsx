@@ -15,10 +15,9 @@ export const GameBoardView: React.FC = () => {
   const {
     room, player, submitAction, results, adminNextRound, adminAdjustPoints,
     adminForceEndGame, usePowerup, resolvePendingPowerup, adminAwardPowerup,
-    lastNotification, clearNotification, error, clearError, adminUpdateSettings
+    lastNotification, clearNotification, error, clearError, adminUpdateSettings,
+    lastActionTaken
   } = useGame();
-
-  const [selectedAction, setSelectedAction] = useState<ActionType | null>(null);
 
   // Dynamic timer bound to room duration
   const defaultDuration = room?.roundDuration || 40;
@@ -42,6 +41,10 @@ export const GameBoardView: React.FC = () => {
   // Powerups local state
   const [targetingCardCode, setTargetingCardCode] = useState<string | null>(null);
   const [swapSelectedIdx, setSwapSelectedIdx] = useState<number>(0);
+
+  // Action selection: local for immediate feedback, fallback to server-confirmed
+  const [selectedAction, setSelectedAction] = useState<ActionType | null>(null);
+  const confirmedAction = selectedAction || lastActionTaken;
 
   // Sync live settings form when room values change
   useEffect(() => {
@@ -426,7 +429,7 @@ export const GameBoardView: React.FC = () => {
               <div className="backdrop-blur-md bg-white/5 border border-white/10 rounded-2xl p-5 flex-1">
                 <div className="flex justify-between items-center border-b border-white/5 pb-3 mb-4">
                   <h3 className="text-sm font-bold uppercase tracking-widest text-gray-400">Quyết Định Hành Động</h3>
-                  {selectedAction && (
+                  {confirmedAction && (
                     <span className="px-3 py-1 bg-green-500/10 border border-green-500/20 text-green-400 text-xs font-bold rounded-lg animate-pulse">Đã khóa hành động</span>
                   )}
                 </div>
@@ -435,15 +438,15 @@ export const GameBoardView: React.FC = () => {
                   {[ActionType.PRODUCE, ActionType.INVEST, ActionType.WELFARE, ActionType.OPTIMIZE, ActionType.SOCIAL].map((act) => {
                     const details = getActionDetails(act);
                     if (!details) return null;
-                    const isThisSelected = selectedAction === act;
+                    const isThisSelected = confirmedAction === act;
                     return (
                       <button
                         key={act}
                         onClick={() => handleActionSelect(act)}
-                        disabled={!!selectedAction}
+                        disabled={!!confirmedAction}
                         className={`w-full text-left p-4 rounded-xl border transition-all ${
                           isThisSelected ? 'border-red-500 bg-red-950/20 shadow-lg'
-                          : selectedAction ? 'border-white/5 opacity-40 cursor-not-allowed'
+                          : confirmedAction ? 'border-white/5 opacity-40 cursor-not-allowed'
                           : 'border-white/5 bg-white/5 hover:bg-white/10 hover:border-white/20'
                         }`}
                       >
