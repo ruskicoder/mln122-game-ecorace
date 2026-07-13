@@ -169,7 +169,8 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
     newSocket.on('round_started', (data: { round: number; duration: number; macroBudget: number }) => {
       setRoom((prev) => prev ? { ...prev, currentRound: data.round, roundDuration: data.duration, macroBudget: data.macroBudget } : null);
-      setResults(null);
+      // Delay clearing results so players see the round summary for 4 seconds
+      setTimeout(() => setResults(null), 4000);
       setLastActionTaken(null);
     });
 
