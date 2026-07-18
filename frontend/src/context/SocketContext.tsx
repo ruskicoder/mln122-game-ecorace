@@ -84,6 +84,22 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }
   }, [player?.hasSubmitted]);
 
+  const checkAndHandleSocketIdError = (errMessage?: string) => {
+    if (errMessage && (
+      errMessage.includes('Unique constraint failed') ||
+      errMessage.includes('socketId') ||
+      errMessage.includes('prisma.player.update')
+    )) {
+      const lastReload = sessionStorage.getItem('lastSocketErrorReload');
+      const now = Date.now();
+      if (!lastReload || now - parseInt(lastReload) > 10000) {
+        sessionStorage.setItem('lastSocketErrorReload', now.toString());
+        console.warn('[SocketContext] Unique constraint error detected for socketId. Reloading page to reset socket connection.');
+        window.location.reload();
+      }
+    }
+  };
+
   // -----------------------------------------------------------------------
   // Socket lifecycle — created ONCE on mount. Never recreated.
   // -----------------------------------------------------------------------
@@ -122,6 +138,7 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
               players: rData.players || prev?.players || [],
             }));
           } else {
+            checkAndHandleSocketIdError(res.error);
             localStorage.removeItem('playerId');
             localStorage.removeItem('roomId');
             localStorage.removeItem('adminToken');
@@ -351,6 +368,7 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       }, (socketRes: SocketResponse<{ player: Player; room: Room }>) => {
         if (!socketRes.success) {
           setError(socketRes.error || 'Lỗi khi kết nối socket');
+          checkAndHandleSocketIdError(socketRes.error);
         } else if (socketRes.data) {
           const rData = socketRes.data.room;
           setPlayer(socketRes.data.player);
@@ -391,6 +409,7 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           }));
         } else {
           setError(res.error || 'Lỗi khi vào phòng');
+          checkAndHandleSocketIdError(res.error);
         }
       });
     } catch (err: any) {

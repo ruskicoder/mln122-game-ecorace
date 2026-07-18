@@ -7,6 +7,21 @@ import { RoundCalculationResult, EconomicRole as SharedEconomicRole, ActionType 
 export class GameService {
   constructor(private readonly prisma: PrismaService) {}
 
+  async clearExistingSocketId(socketId: string, excludePlayerId?: string): Promise<void> {
+    const existing = await this.prisma.player.findUnique({
+      where: { socketId },
+    });
+    if (existing && existing.id !== excludePlayerId) {
+      await this.prisma.player.update({
+        where: { id: existing.id },
+        data: {
+          socketId: `stale-${existing.id}-${Date.now()}`,
+          isOnline: false,
+        },
+      });
+    }
+  }
+
   async getRoomPlayers(roomId: string): Promise<any[]> {
     const formattedRoomId = roomId.toUpperCase();
     const room = await this.prisma.room.findUnique({
@@ -123,6 +138,10 @@ export class GameService {
 
   async joinRoom(roomId: string, username: string, socketId: string): Promise<Player> {
     const formattedRoomId = roomId.toUpperCase();
+    
+    // Clear any existing player records currently associated with this socketId
+    await this.clearExistingSocketId(socketId);
+
     const room = await this.prisma.room.findUnique({
       where: { id: formattedRoomId },
       include: { players: true },
@@ -167,6 +186,9 @@ export class GameService {
   }
 
   async reconnectPlayer(playerId: string, roomId: string, socketId: string): Promise<Player> {
+    // Clear any other player records currently associated with this socketId
+    await this.clearExistingSocketId(socketId, playerId);
+
     const player = await this.prisma.player.findUnique({
       where: { id: playerId },
     });
