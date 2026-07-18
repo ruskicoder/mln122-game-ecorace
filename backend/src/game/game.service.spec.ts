@@ -23,6 +23,13 @@ describe('GameService', () => {
       count: jest.fn(),
       create: jest.fn(),
     },
+    partnership: {
+      findMany: jest.fn().mockResolvedValue([]),
+    },
+    marketHistory: {
+      create: jest.fn(),
+      findMany: jest.fn().mockResolvedValue([]),
+    },
   };
 
   beforeEach(async () => {
@@ -161,9 +168,9 @@ describe('GameService', () => {
       const result = await service.resolveRound('TEST01', 1);
 
       expect(result.results['soe-id']).toBeDefined();
-      expect(result.results['soe-id'].taxPaid).toBe(2.0); // 10% of 20 since cap is <= 20
-      expect(result.results['soe-id'].capitalChange).toBe(18.0); // 20 - 2
-      expect(result.macroBudget).toBe(2.0);
+      expect(result.results['soe-id'].taxPaid).toBe(1.7); // 10% of 17
+      expect(result.results['soe-id'].capitalChange).toBe(15.3); // 17 - 1.7
+      expect(result.macroBudget).toBe(1.7);
     });
   });
 });

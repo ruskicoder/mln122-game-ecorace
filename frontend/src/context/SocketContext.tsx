@@ -17,7 +17,7 @@ interface SocketContextType {
   submitAction: (actionType: ActionType) => void;
   adminStartGame: () => void;
   adminNextRound: () => void;
-  adminUpdateSettings: (maxRounds: number, roundDuration: number, spectatorMode?: boolean) => void;
+  adminUpdateSettings: (maxRounds: number, roundDuration: number, summaryDuration?: number, spectatorMode?: boolean) => void;
   adminAdjustPoints: (playerId: string, capitalDelta: number, scoreDelta: number) => void;
   adminForceEndGame: () => void;
   adminSetSpectatorMode: (spectatorMode: boolean) => void;
@@ -72,6 +72,17 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   useEffect(() => {
     roomRef.current = room;
   }, [room]);
+
+  // Sync lastActionTaken with player.hasSubmitted to prevent lockups on sync/refresh
+  useEffect(() => {
+    if (player) {
+      if (!player.hasSubmitted) {
+        setLastActionTaken(null);
+      } else if (lastActionTaken === null) {
+        setLastActionTaken(ActionType.PRODUCE);
+      }
+    }
+  }, [player?.hasSubmitted]);
 
   // -----------------------------------------------------------------------
   // Socket lifecycle — created ONCE on mount. Never recreated.
@@ -169,8 +180,7 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
     newSocket.on('round_started', (data: { round: number; duration: number; macroBudget: number }) => {
       setRoom((prev) => prev ? { ...prev, currentRound: data.round, roundDuration: data.duration, macroBudget: data.macroBudget } : null);
-      // Delay clearing results so players see the round summary for 4 seconds
-      setTimeout(() => setResults(null), 4000);
+      setResults(null);
       setLastActionTaken(null);
     });
 
@@ -189,10 +199,6 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }) => {
       setResults(data.results);
       if (data.marketHistories) setMarketHistories(data.marketHistories);
-      if (data.macroEventTriggered) {
-        setMacroEventTriggered(data.macroEventTriggered);
-        setTimeout(() => setMacroEventTriggered(null), 10000);
-      }
       setRoom((prev) => prev ? {
         ...prev,
         players: data.players,
@@ -205,6 +211,15 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       if (data.epicDraws && data.epicDraws.length > 0) {
         setLastNotification(data.epicDraws[0]);
       }
+    });
+
+    newSocket.on('macro_event_triggered', (data: { macroEventTriggered: string; activeEvent?: string | null }) => {
+      setResults(null);
+      setMacroEventTriggered(data.macroEventTriggered);
+      if (data.activeEvent) {
+        setRoom((prev) => prev ? { ...prev, activeEvent: data.activeEvent ?? null } : null);
+      }
+      setTimeout(() => setMacroEventTriggered(null), 10000);
     });
 
     newSocket.on('market_price_updated', (data: { marketHistories: MarketHistory[] }) => {
@@ -223,6 +238,7 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     newSocket.on('voting_started', (data: { round: number; duration: number }) => {
       setVotingState(data);
       setVotes([]);
+      setResults(null);
     });
 
     newSocket.on('voting_ended', (data: { winner: string; progressiveCount: number; stimulusCount: number; room: Room }) => {
@@ -415,12 +431,12 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }
   };
 
-  const adminUpdateSettings = (maxRounds: number, roundDuration: number, spectatorMode?: boolean) => {
+  const adminUpdateSettings = (maxRounds: number, roundDuration: number, summaryDuration?: number, spectatorMode?: boolean) => {
     const adminToken = localStorage.getItem('adminToken');
     const s = socketRef.current;
     const r = roomRef.current;
     if (s && r && adminToken) {
-      s.emit('admin_update_settings', { roomId: r.id, maxRounds, roundDuration, spectatorMode }, (res: SocketResponse) => {
+      s.emit('admin_update_settings', { roomId: r.id, maxRounds, roundDuration, summaryDuration, spectatorMode }, (res: SocketResponse) => {
         if (!res.success) setError(res.error || 'Lỗi khi cập nhật cài đặt');
       });
     }

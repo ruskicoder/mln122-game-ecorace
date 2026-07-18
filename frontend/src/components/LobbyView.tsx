@@ -8,6 +8,7 @@ export const LobbyView: React.FC = () => {
   // Local state for admin customization form inputs
   const [maxRounds, setMaxRounds] = useState(room?.maxRounds || 5);
   const [roundDuration, setRoundDuration] = useState(room?.roundDuration || 40);
+  const [summaryDuration, setSummaryDuration] = useState(room?.summaryDuration || 10);
   const [spectatorMode, setSpectatorMode] = useState(room?.spectatorMode ?? false);
 
   // Sync state if room changes
@@ -15,9 +16,10 @@ export const LobbyView: React.FC = () => {
     if (room) {
       setMaxRounds(room.maxRounds);
       setRoundDuration(room.roundDuration);
+      setSummaryDuration(room.summaryDuration ?? 10);
       setSpectatorMode(room.spectatorMode ?? false);
     }
-  }, [room?.maxRounds, room?.roundDuration, room?.spectatorMode]);
+  }, [room?.maxRounds, room?.roundDuration, room?.summaryDuration, room?.spectatorMode]);
 
   const handleCopyCode = () => {
     if (room?.id) {
@@ -29,7 +31,7 @@ export const LobbyView: React.FC = () => {
   const handleApplySettings = (e: React.FormEvent) => {
     e.preventDefault();
     if (player?.isAdmin) {
-      adminUpdateSettings(maxRounds, roundDuration, spectatorMode);
+      adminUpdateSettings(maxRounds, roundDuration, summaryDuration, spectatorMode);
     }
   };
 
@@ -90,7 +92,7 @@ export const LobbyView: React.FC = () => {
               <div className="backdrop-blur-md bg-white/5 border border-white/10 rounded-2xl p-5 text-center flex flex-col justify-center">
                 <span className="text-[10px] uppercase tracking-widest text-gray-400 font-bold block mb-1">Cấu Hình Trận</span>
                 <span className="text-sm font-semibold text-gray-300">
-                  {room?.maxRounds} Vòng | {room?.roundDuration}s / Lượt
+                  {room?.maxRounds} Vòng | {room?.roundDuration}s / Lượt | {room?.summaryDuration ?? 10}s TK
                 </span>
               </div>
             </div>
@@ -104,7 +106,7 @@ export const LobbyView: React.FC = () => {
                     Cấu Hình Phòng Chơi (Chỉ Admin/Giảng viên)
                   </span>
                 </div>
-                <form onSubmit={handleApplySettings} className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+                <form onSubmit={handleApplySettings} className="grid grid-cols-2 md:grid-cols-4 gap-4 items-end">
                   <div>
                     <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1.5 pl-1">
                       Tổng số vòng chơi
@@ -128,6 +130,19 @@ export const LobbyView: React.FC = () => {
                       max="300"
                       value={roundDuration}
                       onChange={(e) => setRoundDuration(parseInt(e.target.value) || 40)}
+                      className="w-full px-3 py-2 bg-black/40 border border-white/10 rounded-xl focus:border-red-500 text-white text-xs outline-none transition"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1.5 pl-1">
+                      Thời gian tổng kết (giây)
+                    </label>
+                    <input
+                      type="number"
+                      min="3"
+                      max="120"
+                      value={summaryDuration}
+                      onChange={(e) => setSummaryDuration(parseInt(e.target.value) || 10)}
                       className="w-full px-3 py-2 bg-black/40 border border-white/10 rounded-xl focus:border-red-500 text-white text-xs outline-none transition"
                     />
                   </div>

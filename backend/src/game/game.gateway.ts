@@ -203,9 +203,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @SubscribeMessage('admin_update_settings')
   async handleUpdateSettings(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: { roomId: string; maxRounds: number; roundDuration: number; spectatorMode?: boolean },
+    @MessageBody() data: { roomId: string; maxRounds: number; roundDuration: number; summaryDuration?: number; spectatorMode?: boolean },
   ): Promise<SocketResponse> {
-    const { roomId, maxRounds, roundDuration, spectatorMode } = data;
+    const { roomId, maxRounds, roundDuration, summaryDuration, spectatorMode } = data;
     const formattedRoomId = roomId.toUpperCase();
 
     let player = await this.prismaFindPlayerBySocket(client.id);
@@ -218,7 +218,13 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     try {
-      const room = await this.gameService.updateRoomSettings(formattedRoomId, maxRounds, roundDuration, spectatorMode);
+      const room = await this.gameService.updateRoomSettings(
+        formattedRoomId,
+        maxRounds,
+        roundDuration,
+        summaryDuration,
+        spectatorMode,
+      );
       const players = await this.gameService.getRoomPlayers(formattedRoomId);
 
       this.server.to(formattedRoomId).emit('room_updated', {
@@ -319,8 +325,20 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     });
 
     const room = await this.gameService.getRoom(roomId);
-    if (room && room.status === 'PLAYING') {
-      // Check if we just completed a multiple of 5 rounds (e.g. round 5, 10...)
+    if (!room) return;
+
+    if (room.status === 'FINISHED') {
+      const leaderboard = await this.gameService.getRoomLeaderboard(roomId);
+      this.server.to(roomId).emit('game_ended', {
+        leaderboard,
+      });
+      return;
+    }
+
+    const summaryDelay = ((room as any).summaryDuration || 10) * 1000;
+
+    // Helper to start the next phase (Voting or next Round)
+    const triggerNextPhase = () => {
       if (round % 5 === 0) {
         this.server.to(roomId).emit('voting_started', {
           round: room.currentRound,
@@ -331,19 +349,31 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
           await this.tallyVotesAndStartNextRound(roomId, room.currentRound);
         }, 20000);
       } else {
-        // Broadcast new round start immediately
         this.server.to(roomId).emit('round_started', {
           round: room.currentRound,
           duration: room.roundDuration,
           macroBudget: room.macroBudget,
         });
       }
-    } else if (room && room.status === 'FINISHED') {
-      const leaderboard = await this.gameService.getRoomLeaderboard(roomId);
-      this.server.to(roomId).emit('game_ended', {
-        leaderboard,
-      });
-    }
+    };
+
+    // Step 1: Wait for summary duration first
+    setTimeout(() => {
+      // Step 2: If a macro event was triggered, show the event popup and wait 10s
+      if (result.macroEventTriggered) {
+        this.server.to(roomId).emit('macro_event_triggered', {
+          macroEventTriggered: result.macroEventTriggered,
+          activeEvent: room.activeEvent,
+        });
+
+        setTimeout(() => {
+          triggerNextPhase();
+        }, 10000);
+      } else {
+        // No event, move to next phase directly
+        triggerNextPhase();
+      }
+    }, summaryDelay);
   }
 
   private async tallyVotesAndStartNextRound(roomId: string, round: number) {

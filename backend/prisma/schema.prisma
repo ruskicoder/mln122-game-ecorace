@@ -36,6 +36,7 @@ model Room {
   currentRound     Int             @default(1)
   maxRounds        Int             @default(5)
   roundDuration    Int             @default(40)
+  summaryDuration  Int             @default(10)
   spectatorMode    Boolean         @default(false)
   warActive        Boolean         @default(false)  // WAR card: INVEST costs +10 when true
   macroBudget      Float           @default(0.0)

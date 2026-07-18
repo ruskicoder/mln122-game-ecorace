@@ -7,10 +7,31 @@ import { RoundCalculationResult, EconomicRole as SharedEconomicRole, ActionType 
 export class GameService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async getRoomPlayers(roomId: string): Promise<Player[]> {
-    return this.prisma.player.findMany({
-      where: { roomId },
+  async getRoomPlayers(roomId: string): Promise<any[]> {
+    const formattedRoomId = roomId.toUpperCase();
+    const room = await this.prisma.room.findUnique({
+      where: { id: formattedRoomId },
+      select: { currentRound: true },
+    });
+    const currentRound = room?.currentRound ?? 1;
+
+    const players = await this.prisma.player.findMany({
+      where: { roomId: formattedRoomId },
+      include: {
+        actions: {
+          where: { round: currentRound },
+          select: { id: true },
+        },
+      },
       orderBy: { totalScore: 'desc' },
+    });
+
+    return players.map((p) => {
+      const { actions, ...playerData } = p;
+      return {
+        ...playerData,
+        hasSubmitted: actions.length > 0,
+      };
     });
   }
 
@@ -36,6 +57,7 @@ export class GameService {
     roomId: string,
     maxRounds: number,
     roundDuration: number,
+    summaryDuration?: number,
     spectatorMode?: boolean,
   ): Promise<Room> {
     const formattedRoomId = roomId.toUpperCase();
@@ -53,11 +75,16 @@ export class GameService {
       }
     }
 
+    if (summaryDuration !== undefined && summaryDuration < 3) {
+      throw new BadRequestException('Thời gian tổng kết tối thiểu là 3 giây');
+    }
+
     return this.prisma.room.update({
       where: { id: formattedRoomId },
       data: {
         maxRounds,
         roundDuration,
+        ...(summaryDuration !== undefined ? { summaryDuration } : {}),
         ...(spectatorMode !== undefined ? { spectatorMode } : {}),
       },
     });

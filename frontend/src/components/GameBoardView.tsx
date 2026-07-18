@@ -37,6 +37,7 @@ export const GameBoardView: React.FC = () => {
   // Live settings (admin during PLAYING)
   const [liveMaxRounds, setLiveMaxRounds] = useState<number>(room?.maxRounds ?? 5);
   const [liveRoundDuration, setLiveRoundDuration] = useState<number>(room?.roundDuration ?? 40);
+  const [liveSummaryDuration, setLiveSummaryDuration] = useState<number>(room?.summaryDuration ?? 10);
 
   // Powerups local state
   const [targetingCardCode, setTargetingCardCode] = useState<string | null>(null);
@@ -50,7 +51,8 @@ export const GameBoardView: React.FC = () => {
   useEffect(() => {
     setLiveMaxRounds(room?.maxRounds ?? 5);
     setLiveRoundDuration(room?.roundDuration ?? 40);
-  }, [room?.maxRounds, room?.roundDuration]);
+    setLiveSummaryDuration(room?.summaryDuration ?? 10);
+  }, [room?.maxRounds, room?.roundDuration, room?.summaryDuration]);
 
   // Derived flags
   const isAdmin = player?.isAdmin ?? false;
@@ -88,7 +90,7 @@ export const GameBoardView: React.FC = () => {
   };
 
   const handleApplyLiveSettings = () => {
-    adminUpdateSettings(liveMaxRounds, liveRoundDuration);
+    adminUpdateSettings(liveMaxRounds, liveRoundDuration, liveSummaryDuration);
   };
 
   const getPowerupInfo = (code: string) => {
@@ -608,6 +610,18 @@ export const GameBoardView: React.FC = () => {
                   className="w-full px-2 py-1.5 bg-black/40 border border-white/10 rounded-lg text-xs text-white outline-none"
                 />
                 <p className="text-[9px] text-gray-500 mt-0.5">Tối thiểu 10 giây</p>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Thời gian tổng kết (giây)</label>
+                <input
+                  type="number"
+                  min={3}
+                  value={liveSummaryDuration}
+                  onChange={(e) => setLiveSummaryDuration(parseInt(e.target.value) || 3)}
+                  className="w-full px-2 py-1.5 bg-black/40 border border-white/10 rounded-lg text-xs text-white outline-none"
+                />
+                <p className="text-[9px] text-gray-500 mt-0.5">Tối thiểu 3 giây</p>
               </div>
 
               <button

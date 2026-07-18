@@ -58,6 +58,7 @@ export interface Player {
   partnershipsA?: Partnership[];
   partnershipsB?: Partnership[];
   votes?: PolicyVote[];
+  hasSubmitted?: boolean;
 }
 
 export interface Room {
@@ -66,6 +67,7 @@ export interface Room {
   currentRound: number;
   maxRounds: number;
   roundDuration: number;
+  summaryDuration?: number;
   spectatorMode: boolean;
   warActive: boolean;
   macroBudget: number;
